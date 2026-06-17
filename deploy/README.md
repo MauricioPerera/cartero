@@ -9,6 +9,10 @@ The relay and the handle `.well-known` are served from one VPS behind Cloudflare
   Only `src/relay.js` is needed (no postal dep — pure `node:http`).
 - **Handle bindings** — static JSON under `/var/www/cartero/well-known-postal/`, served
   at `/.well-known/postal/<user>.json` with `Access-Control-Allow-Origin: *`.
+- **Discovery registry** — `bin/registry-server.mjs` (imports `src/registry.js` +
+  `vendor/postal/src/crypto.js`), under pm2 as `cartero-registry`, bound to `127.0.0.1:8791`,
+  records under `$REGISTRY_DIR` (`/var/lib/cartero-registry`). Verifies + stores self-signed
+  `id → outbox` records at `/register`, serves them at `/id/<id>`; resolvers re-verify.
 - **nginx vhost** — [`nginx-cartero.ardf.dev.conf`](nginx-cartero.ardf.dev.conf) at
   `/etc/nginx/sites-available/cartero.ardf.dev` (symlinked into `sites-enabled/`). Proxies
   `/sub` (SSE) + `/pub` to the relay; serves `/.well-known/postal/`. TLS terminates at

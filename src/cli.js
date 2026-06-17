@@ -15,6 +15,7 @@ import { outbox, eventPath } from "./outbox.js";
 import { buildDm, deriveChatId, resolveConversation, verifyDm, openDm } from "./convo.js";
 import { buildGroupDoc, verifyGroupDoc, buildGm, resolveGroup as resolveGroupItems } from "./group.js";
 import { buildDeviceCert } from "./device.js";
+import { buildRegistryRecord, publishToRegistry, resolveId } from "./registry.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "./relay.js";
 import { encryptFile, decryptFile, makeDescriptor } from "./attach.js";
 import { parseUri } from "./uri.js";
@@ -30,6 +31,8 @@ const positional = (args) => args.filter((a, i) => !a.startsWith("--") && !(i > 
 // Relay is OPT-IN / self-hosted by default: no third-party relay unless you point at one with
 // --relay <url> or $CARTERO_RELAY. With none set, delivery is git-only (async). --no-relay forces off.
 const relayUrl = (args) => args.includes("--no-relay") ? null : (flag(args, "relay") || process.env.CARTERO_RELAY || null);
+// Discovery registry (id -> outbox): opt-in / self-hosted, like the relay.
+const registryUrl = (args) => flag(args, "registry") || process.env.CARTERO_REGISTRY || null;
 
 const myOutbox = (cfg) => outbox({ host: cfg.host, owner: cfg.owner, repo: cfg.repo, token: token() });
 const peerOutbox = (uri) => { const u = parseUri(uri); return outbox({ host: u.host, owner: u.owner, repo: u.repo, token: token() }); };
@@ -84,8 +87,14 @@ async function cmdContactAdd(args) {
   let target = pos[0], petname = pos[1];
   if (!target) die("usage: cartero contact add <user@domain | uri> [petname]");
   let uri, handle = null;
+  const bareId = target.replace(/^postal:/, "");
   if (target.startsWith("postal://")) {
     uri = target;
+  } else if (/^[A-Fa-f0-9]{16}$/.test(bareId)) {        // a bare id -> resolve outbox via the registry
+    const reg = registryUrl(args) || die("resolving a bare id needs a registry: --registry <url> or $CARTERO_REGISTRY");
+    const r = await resolveId(reg, bareId);
+    uri = `${r.outbox}#${r.id}`;
+    if (!petname) petname = bareId.slice(0, 6);
   } else {                                              // a user@domain handle -> resolve via .well-known
     const r = await resolveHandle(target);
     uri = `${r.outbox}#${r.id}`;
@@ -308,15 +317,27 @@ async function cmdDevice(args) {
   die("usage: cartero device <add [name] | import <bundle.json>>");
 }
 
+// Publish your id -> outbox record to a registry, so others can add you by your bare id.
+async function cmdRegister(args) {
+  const reg = registryUrl(args) || die("set a registry: --registry <url> or $CARTERO_REGISTRY");
+  const identity = await state.loadIdentity(pass());
+  const cfg = await state.loadConfig() || die("run `cartero init` first");
+  const rec = await buildRegistryRecord(identity, { outbox: `postal://${cfg.host}/${cfg.owner}/${cfg.repo}`, updated_at: new Date().toISOString() });
+  await publishToRegistry(reg, rec);
+  console.log(`✓ registered ${identity.id} -> your outbox at ${reg}`);
+  console.log(`  others can now add you with:  cartero contact add ${identity.id} --registry ${reg}`);
+}
+
 const [cmd, sub] = process.argv.slice(2);
 const args = process.argv.slice(2);
 try {
   if (cmd === "init") await cmdInit(args);
+  else if (cmd === "register") await cmdRegister(args);
   else if (cmd === "contact" && sub === "add") await cmdContactAdd(args);
   else if (cmd === "send") await cmdSend(args);
   else if (cmd === "read") await cmdRead(args);
   else if (cmd === "watch") await cmdWatch(args);
   else if (cmd === "group") await cmdGroup(args);
   else if (cmd === "device") await cmdDevice(args);
-  else die("commands: init · contact add · send · read · watch · group · device");
+  else die("commands: init · register · contact add · send · read · watch · group · device");
 } catch (e) { die(e.message); }

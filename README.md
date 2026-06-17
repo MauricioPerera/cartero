@@ -9,7 +9,7 @@ keeping everything.
 
 Built on the [postal](https://github.com/MauricioPerera/postal) protocol (vendored as a git
 submodule). DMs and groups, text + file attachments, key-based identity, `user@domain` handles,
-an optional real-time relay, a CLI, and a web UI.
+id-based discovery, an optional real-time relay, a CLI, and a web UI.
 
 > [!WARNING]
 > **Experimental — MVP, not security-audited.** The cryptographic core is signed (ECDSA P-256)
@@ -79,6 +79,22 @@ cartero group send project "hi all" [--file ...]
 cartero group read project               # merge of every member's outbox
 ```
 
+### Discovery — add someone by just their id (F4)
+
+Share only your short id (`postal:A1B2C3D4E5F60718`) instead of a full URI. You publish a
+**self-signed** `id → outbox` record to a registry; others resolve your id through it.
+
+```bash
+cartero register --registry <url>                  # publish your id -> outbox (or $CARTERO_REGISTRY)
+cartero contact add <id> --registry <url>          # add a contact by their bare id
+```
+
+Only you can claim your own id (id = your key's fingerprint → **no squatting**), and resolvers
+**re-verify every record locally**, so a malicious registry can't point you at the wrong outbox —
+it can only refuse to serve (use another, or share your URI/handle directly). Like the relay, the
+registry is **opt-in / self-hosted** (`--registry` / `$CARTERO_REGISTRY`); run your own from
+[`deploy/`](deploy/).
+
 ### Domain handles (`user@domain`)
 
 A readable, give-out-able address resolved WebFinger-style. `cartero init --handle alice@you.dev`
@@ -139,9 +155,11 @@ Honest, by design:
 
 ## Roadmap
 
-`SPEC-F0` (contract) · F1 MVP (DMs, attachments, CLI) · F2 handles + relay (deployed) · F3 groups +
-multi-device + web UI — **done**. Next: F4 — federation discovery (a global `id → repo` registry)
-and a multi-repo aggregator; pinning the canonical form; an independent security review.
+`SPEC-F0` (contract) · F1 MVP (DMs, attachments, CLI) · F2 handles + relay · F3 groups +
+multi-device + web UI · F4 **discovery registry** (`id → repo`) — **done & deployed**. Remaining
+in F4 and beyond: a multi-repo aggregator (a federated timeline; per-conversation merge already
+covers DM/group), pinning the canonical form (JCS/RFC 8785) for cross-implementation interop, and
+an independent security review.
 
 ## License
 
