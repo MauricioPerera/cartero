@@ -18,7 +18,7 @@ import { buildDeviceCert } from "./device.js";
 import { buildRegistryRecord, publishToRegistry, resolveId } from "./registry.js";
 import { summarizeInbox, preview } from "./inbox.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "./relay.js";
-import { encryptFile, decryptFile, makeDescriptor } from "./attach.js";
+import { encryptFile, decryptFile, makeDescriptor, mimeFor } from "./attach.js";
 import { parseUri } from "./uri.js";
 import { resolveHandle, buildHandleDoc, parseHandle } from "./handle.js";
 import * as state from "./state.js";
@@ -121,12 +121,7 @@ async function cmdSend(args) {
   const peerId = Object.keys(directory).find((id) => id !== identity.id);
 
   const attachments = [], blobFiles = [];
-  if (file) {
-    const bytes = new Uint8Array(await readFile(file));
-    const enc = await encryptFile(bytes);
-    attachments.push(makeDescriptor({ name: basename(file), mime: "application/octet-stream", size: bytes.length, hash: enc.hash, key: enc.key }));
-    blobFiles.push(out.blobFile(enc.hash, enc.ct));
-  }
+  if (file) { const a = await attachOne(file, out); attachments.push(a.desc); blobFiles.push(a.blob); }
   const c = await chainOf(out, chat, identity.id);
   const created_at = new Date().toISOString();
   const rnd = Math.random().toString(36).slice(2, 8);
@@ -212,7 +207,7 @@ const nameOf = (directory, id, myId) => id === myId ? "you" : ((directory[id] &&
 async function attachOne(file, out) {
   const bytes = new Uint8Array(await readFile(file));
   const enc = await encryptFile(bytes);
-  return { desc: makeDescriptor({ name: basename(file), mime: "application/octet-stream", size: bytes.length, hash: enc.hash, key: enc.key }), blob: out.blobFile(enc.hash, enc.ct) };
+  return { desc: makeDescriptor({ name: basename(file), mime: mimeFor(file), size: bytes.length, hash: enc.hash, key: enc.key }), blob: out.blobFile(enc.hash, enc.ct) };
 }
 
 async function groupCreate(args) {

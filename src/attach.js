@@ -39,3 +39,17 @@ export async function decryptFile(ct, keyB64, expectHash) {
 export function makeDescriptor({ name, mime, size, hash, key, locator, thumb = null }) {
   return { name: String(name || ""), mime: String(mime || "application/octet-stream"), size, hash, key, locator: locator || `blobs/${hash}`, thumb };
 }
+
+// Best-effort MIME from a filename extension (zero deps). The CLI has no File.type like the
+// browser, so it derives the type here instead of always sending application/octet-stream.
+const MIME = {
+  pdf: "application/pdf", txt: "text/plain", md: "text/markdown", csv: "text/csv", json: "application/json",
+  html: "text/html", xml: "application/xml", png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg",
+  gif: "image/gif", webp: "image/webp", svg: "image/svg+xml", mp3: "audio/mpeg", mp4: "video/mp4",
+  zip: "application/zip", doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+};
+export function mimeFor(name) {
+  const ext = String(name || "").toLowerCase().split(".").pop();
+  return MIME[ext] || "application/octet-stream";
+}

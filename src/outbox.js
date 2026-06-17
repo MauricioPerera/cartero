@@ -55,11 +55,6 @@ export function outbox({ host = "github.com", owner, repo, token, branch = "main
       return items;
     },
 
-    // Next (seq, prev) for MY chain in this chat: seq = count of my events, prev = hash of my last.
-    // Reuses Postal's eventHash via the caller (kept here as the count; prev computed by caller).
-    async myChainCount(chat_id, myId) {
-      return (await this.readChat(chat_id)).filter((it) => it.event.from === myId).length;
-    },
   };
 }
 
