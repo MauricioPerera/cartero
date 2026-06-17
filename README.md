@@ -28,7 +28,8 @@ cartero init <owner/repo> --handle alice@perera.dev   # + emite el binding firma
 cartero contact add <uri | user@domain> bob  # resuelve+verifica (URI o handle), guarda "bob"
 cartero send bob "hola 👋" [--file ./doc.pdf] # envía un DM sellado (con adjunto opcional)
 cartero read bob [--save ./descargas]        # imprime la conversación (merge de ambos outboxes)
-cartero watch bob                            # poll cada 3s, imprime lo nuevo
+cartero watch bob [--relay http://host:port] # poll cada 3s + (opcional) entrega instantánea
+cartero send bob "hola" --relay http://host:port   # commitea a git Y reenvía al instante
 ```
 
 `CARTERO_HOME` separa estados locales (útil para probar varias identidades en una máquina).
@@ -40,6 +41,16 @@ emite un **binding firmado** que publicás en `https://perera.dev/.well-known/po
 Doble atestación: el **dominio** lo sirve (TLS = control del dominio) y la **clave** lo firma
 (consiente el binding `handle ↔ id ↔ outbox`). Debajo la identidad sigue siendo la clave, así que
 el handle es un **alias portable y desechable**. Otros te agregan con `cartero contact add alice@perera.dev`.
+
+### Relay para inmediatez (F2b, opcional)
+
+Sin relay la entrega es asíncrona (2–5 s por poll). Con un **relay** (`src/relay.js`, un
+reenviador **no-confiable**): `send --relay <url>` commitea a git **y** reenvía el evento al
+instante; `watch --relay <url>` se suscribe (SSE) y muestra lo nuevo en sub-segundo. El relay
+**nunca descifra** (ciphertext) y **no gana autoridad**: el receptor corre el gate en cada evento
+relayado, así un payload forjado se rechaza igual que uno leído de git. Git sigue siendo el
+registro durable. *(Disparar la entrega desde un push de git —webhook GitHub→relay— necesita el
+relay en una URL pública + HMAC del secreto: queda para hosting, no incluido.)*
 
 ## Verificación
 

@@ -12,7 +12,8 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { createIdentity, publicIdentityDoc, eventHash } from "../vendor/postal/src/postal.js";
 import { outbox, eventPath } from "./outbox.js";
-import { buildDm, deriveChatId, resolveConversation } from "./convo.js";
+import { buildDm, deriveChatId, resolveConversation, verifyDm, openDm } from "./convo.js";
+import { publish as relayPublish, subscribe as relaySubscribe } from "./relay.js";
 import { encryptFile, decryptFile, makeDescriptor } from "./attach.js";
 import { parseUri } from "./uri.js";
 import { resolveHandle, buildHandleDoc, parseHandle } from "./handle.js";
@@ -112,7 +113,9 @@ async function cmdSend(args) {
   const rnd = Math.random().toString(36).slice(2, 8);
   const ev = await buildDm(identity, peerId, { text, reply_to: null, attachments }, { created_at, rnd, seq: c.seq, prev: c.prev, directory });
   await out.appendEvent({ path: eventPath(chat, ev), event: ev }, blobFiles);
-  console.log("✓ sent" + (file ? " (+1 attachment)" : ""));
+  const relay = flag(args, "relay");                      // optional: instant fan-out (git stays the record)
+  if (relay) await relayPublish(relay, chat, ev);
+  console.log("✓ sent" + (file ? " (+1 attachment)" : "") + (relay ? " (relayed)" : ""));
 }
 
 async function loadConvo(petname) {
@@ -149,14 +152,26 @@ async function cmdRead(args) {
 
 async function cmdWatch(args) {
   const [petname] = positional(args.slice(1));
-  if (!petname) die("usage: cartero watch <petname>");
-  let seen = new Set();
+  if (!petname) die("usage: cartero watch <petname> [--relay url]");
+  const seen = new Set();
   const tick = async () => {
     const { convo } = await loadConvo(petname);
     for (const m of convo) if (!seen.has(m.id)) { seen.add(m.id); printConvo([m], petname); }
   };
   await tick();
-  setInterval(() => tick().catch((e) => console.error("✗ " + e.message)), 3000);
+  setInterval(() => tick().catch((e) => console.error("✗ " + e.message)), 3000);   // poll = backfill + durable record
+
+  const relay = flag(args, "relay");
+  if (relay) {                                            // + instant delivery; gate every relayed event
+    const { identity, directory, chat } = await context(petname);
+    relaySubscribe(relay, chat, async (ev) => {
+      if (seen.has(ev.id) || !(await verifyDm(ev, { directory })).ok) return;
+      seen.add(ev.id);
+      let c = null; try { c = await openDm(ev, identity); } catch {}
+      printConvo([{ id: ev.id, from: ev.from, at: ev.created_at, mine: ev.from === identity.id,
+        text: c ? c.text : null, reply_to: c ? c.reply_to || null : null, attachments: c ? c.attachments || [] : [], readable: !!c }], petname);
+    }).catch((e) => console.error("relay: " + e.message));
+  }
 }
 
 const [cmd, sub] = process.argv.slice(2);
