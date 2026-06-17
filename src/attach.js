@@ -10,6 +10,10 @@ import { sha256, bytesToBase64, base64ToBytes, randomBytes } from "../vendor/pos
 
 const subtle = globalThis.crypto.subtle;
 const IV = 12;
+
+// Default attachment size cap (the MVP targets small files; SPEC-F0 §6). Blobs go straight to the
+// git host, so an unbounded file would bloat the repo. Overridable per send.
+export const DEFAULT_MAX_ATTACH = 8 * 1024 * 1024;
 const hex = (b) => Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
 
 // Encrypt file bytes. Returns { ct, hash, key } — store `ct` at blobs/<hash>, put `key`+`hash`

@@ -8,7 +8,7 @@
 //
 // Secrets: passphrase via $CARTERO_PASS; GitHub token via $GH_TOKEN. Identity is stored
 // encrypted under ~/.cartero (override with $CARTERO_HOME).
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { createIdentity, publicIdentityDoc, eventHash } from "../vendor/postal/src/postal.js";
 import { outbox, eventPath } from "./outbox.js";
@@ -18,7 +18,7 @@ import { buildDeviceCert } from "./device.js";
 import { buildRegistryRecord, publishToRegistry, resolveId } from "./registry.js";
 import { summarizeInbox, preview } from "./inbox.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "./relay.js";
-import { encryptFile, decryptFile, makeDescriptor, mimeFor } from "./attach.js";
+import { encryptFile, decryptFile, makeDescriptor, mimeFor, DEFAULT_MAX_ATTACH } from "./attach.js";
 import { parseUri } from "./uri.js";
 import { resolveHandle, buildHandleDoc, parseHandle } from "./handle.js";
 import * as state from "./state.js";
@@ -34,6 +34,7 @@ const positional = (args) => args.filter((a, i) => !a.startsWith("--") && !(i > 
 const relayUrl = (args) => args.includes("--no-relay") ? null : (flag(args, "relay") || process.env.CARTERO_RELAY || null);
 // Discovery registry (id -> outbox): opt-in / self-hosted, like the relay.
 const registryUrl = (args) => flag(args, "registry") || process.env.CARTERO_REGISTRY || null;
+const maxAttach = (args) => Math.round((Number(flag(args, "max-mb")) || Number(process.env.CARTERO_MAX_ATTACH_MB) || (DEFAULT_MAX_ATTACH / 1048576)) * 1048576);
 
 const myOutbox = (cfg) => outbox({ host: cfg.host, owner: cfg.owner, repo: cfg.repo, token: token() });
 const peerOutbox = (uri) => { const u = parseUri(uri); return outbox({ host: u.host, owner: u.owner, repo: u.repo, token: token() }); };
@@ -121,7 +122,7 @@ async function cmdSend(args) {
   const peerId = Object.keys(directory).find((id) => id !== identity.id);
 
   const attachments = [], blobFiles = [];
-  if (file) { const a = await attachOne(file, out); attachments.push(a.desc); blobFiles.push(a.blob); }
+  if (file) { const a = await attachOne(file, out, maxAttach(args)); attachments.push(a.desc); blobFiles.push(a.blob); }
   const c = await chainOf(out, chat, identity.id);
   const created_at = new Date().toISOString();
   const rnd = Math.random().toString(36).slice(2, 8);
@@ -203,8 +204,11 @@ async function groupDirectory(doc) {
 }
 const nameOf = (directory, id, myId) => id === myId ? "you" : ((directory[id] && directory[id].display_name) || id.slice(0, 8));
 
-// Encrypt a file into an attachment descriptor + blob (shared by DM and group send).
-async function attachOne(file, out) {
+// Encrypt a file into an attachment descriptor + blob (shared by DM and group send). Refuses files
+// over `maxBytes` (blobs go straight to git, so an unbounded file would bloat the repo).
+async function attachOne(file, out, maxBytes = DEFAULT_MAX_ATTACH) {
+  const { size } = await stat(file);
+  if (size > maxBytes) die(`attachment too large: ${(size / 1048576).toFixed(1)} MB > ${(maxBytes / 1048576).toFixed(0)} MB limit (raise with --max-mb or $CARTERO_MAX_ATTACH_MB)`);
   const bytes = new Uint8Array(await readFile(file));
   const enc = await encryptFile(bytes);
   return { desc: makeDescriptor({ name: basename(file), mime: mimeFor(file), size: bytes.length, hash: enc.hash, key: enc.key }), blob: out.blobFile(enc.hash, enc.ct) };
@@ -247,7 +251,7 @@ async function groupSend(args) {
   directory[identity.id] = await publicIdentityDoc(identity);
   const out = myOutbox(cfg);
   const attachments = [], blobFiles = [];
-  if (file) { const a = await attachOne(file, out); attachments.push(a.desc); blobFiles.push(a.blob); }
+  if (file) { const a = await attachOne(file, out, maxAttach(args)); attachments.push(a.desc); blobFiles.push(a.blob); }
   const c = await chainOf(out, doc.id, identity.id);
   const ev = await buildGm(identity, doc, { text, reply_to: null, attachments }, { created_at: new Date().toISOString(), rnd: Math.random().toString(36).slice(2, 8), seq: c.seq, prev: c.prev, directory });
   await out.appendEvent({ path: eventPath(doc.id, ev), event: ev }, blobFiles);

@@ -118,7 +118,7 @@ El binario **no** va en el evento. Va cifrado y direccionado por contenido; el e
 
 `K` viaja **dentro del cuerpo sellado** (ya E2EE). El blob es **ciphertext** verificado por `hash`, así que el store es **no-confiable**.
 
-**Al recibir:** desellar cuerpo → leer descriptor → traer `locator` del outbox del emisor → verificar `SHA-256(ct) == hash` (integridad) → descifrar con `K`. Límite MVP: archivos chicos (MB de un dígito).
+**Al recibir:** desellar cuerpo → leer descriptor → traer `locator` del outbox del emisor → verificar `SHA-256(ct) == hash` (integridad) → descifrar con `K`. Límite **enforced**: 8 MB por defecto (configurable con `--max-mb` / `$CARTERO_MAX_ATTACH_MB`); los blobs van directo al host git, así que un archivo sin tope inflaría el repo.
 
 ## 7. Canonicalización (NORMATIVA, fijada en F0)
 

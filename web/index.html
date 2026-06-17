@@ -70,7 +70,7 @@
 import { createIdentity, publicIdentityDoc, eventHash } from "/vendor/postal/src/postal.js";
 import { outbox, eventPath } from "/src/outbox.js";
 import { buildDm, deriveChatId, resolveConversation, verifyDm, openDm } from "/src/convo.js";
-import { encryptFile, decryptFile, makeDescriptor } from "/src/attach.js";
+import { encryptFile, decryptFile, makeDescriptor, DEFAULT_MAX_ATTACH } from "/src/attach.js";
 import { parseUri } from "/src/uri.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "/src/relay.js";
 import { sealSecret, openSecret } from "/src/secret.js";
@@ -191,7 +191,10 @@ async function send() {
   try {
     const c = contacts[current], chat = await deriveChatId(me.id, c.id), out = myOut(), dir = await directoryFor(c);
     const attachments = [], blobFiles = [];
-    if (file) { const enc = await encryptFile(new Uint8Array(await file.arrayBuffer())); attachments.push(makeDescriptor({ name: file.name, mime: file.type||"application/octet-stream", size: file.size, hash: enc.hash, key: enc.key })); blobFiles.push(out.blobFile(enc.hash, enc.ct)); $("file").value = ""; }
+    if (file) {
+      if (file.size > DEFAULT_MAX_ATTACH) { $("send").disabled = false; $("file").value = ""; return alert(`Adjunto demasiado grande: ${(file.size/1048576).toFixed(1)} MB > ${(DEFAULT_MAX_ATTACH/1048576).toFixed(0)} MB`); }
+      const enc = await encryptFile(new Uint8Array(await file.arrayBuffer())); attachments.push(makeDescriptor({ name: file.name, mime: file.type||"application/octet-stream", size: file.size, hash: enc.hash, key: enc.key })); blobFiles.push(out.blobFile(enc.hash, enc.ct)); $("file").value = "";
+    }
     const ch = await chainOf(out, chat);
     const ev = await buildDm(me, c.id, { text, reply_to: null, attachments }, { created_at: new Date().toISOString(), rnd: Math.random().toString(36).slice(2,8), seq: ch.seq, prev: ch.prev, directory: dir });
     await out.appendEvent({ path: eventPath(chat, ev), event: ev }, blobFiles);

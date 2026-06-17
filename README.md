@@ -148,6 +148,8 @@ Honest, by design:
   (per-conversation access control, mixnets) — out of scope.
 - **Order is causal, not total.** Between independent repos there is no trusted sequencer;
   `created_at` is self-asserted and `reply_to` carries happened-before.
+- **Attachments** are capped at **8 MB** by default (blobs go straight to the git host, so an
+  unbounded file would bloat the repo). Raise it per send with `--max-mb` / `$CARTERO_MAX_ATTACH_MB`.
 - **Multi-device:** the master manages devices (no per-device revocation list yet); messages
   sealed *before* a device is added are not readable by it (no retroactive access).
 - **Availability vs sovereignty:** your repo must be reachable when peers read. Any commodity git
