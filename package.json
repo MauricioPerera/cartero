@@ -4,6 +4,9 @@
   "type": "module",
   "description": "Sovereign E2EE messenger over git, on the Postal protocol (MVP F1: 1:1 DM).",
   "license": "MIT",
+  "bin": {
+    "cartero": "src/cli.js"
+  },
   "scripts": {
     "test": "node test/cartero.test.mjs"
   }
