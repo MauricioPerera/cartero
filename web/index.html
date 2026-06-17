@@ -35,15 +35,23 @@
   <label>GitHub token (acceso a tu repo-buzón)</label><input id="s-token" type="password" autocomplete="off">
   <label>Tu outbox — owner/repo</label><input id="s-repo" placeholder="usuario/cartero-outbox">
   <label>Nombre para mostrar</label><input id="s-name" placeholder="Alice">
+  <label>Passphrase (cifra tu identidad + token en este navegador)</label><input id="s-pass" type="password" autocomplete="new-password">
   <button class="btn" id="s-go">Crear identidad y publicar</button>
-  <p class="warn" style="margin-top:14px">La clave privada y el token se guardan en este navegador (localStorage). Es un MVP — usá un token de alcance mínimo.</p>
+  <p class="warn" style="margin-top:14px">Tu clave privada y el token se guardan <b>cifrados</b> (AES-GCM con tu passphrase); en localStorage solo queda el cifrado. La passphrase no se guarda — la pedimos cada sesión. Usá un token de alcance mínimo.</p>
+</div>
+
+<div id="unlock" class="setup" hidden>
+  <h1>Cartero</h1>
+  <p>Desbloqueá tu identidad cifrada en este navegador.</p>
+  <label>Passphrase</label><input id="u-pass" type="password" autocomplete="current-password">
+  <button class="btn" id="u-go">Abrir</button>
 </div>
 
 <div id="app" class="wrap" hidden>
   <header>
     <span>Cartero · <b id="me-name"></b></span>
     <span class="uri" id="me-uri" title="copiar tu URI"></span>
-    <span style="margin-left:auto"><button class="btn" id="add">+ contacto</button></span>
+    <span style="margin-left:auto"><button class="btn" id="lock" title="bloquear">🔒</button> <button class="btn" id="add">+ contacto</button></span>
   </header>
   <aside><h2>CONTACTOS</h2><div id="contacts"></div></aside>
   <main>
@@ -64,14 +72,19 @@ import { buildDm, deriveChatId, resolveConversation, verifyDm, openDm } from "/s
 import { encryptFile, decryptFile, makeDescriptor } from "/src/attach.js";
 import { parseUri } from "/src/uri.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "/src/relay.js";
+import { sealSecret, openSecret } from "/src/secret.js";
 
 const RELAY = "https://cartero.ardf.dev";
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v==null?"":v).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const LS = { get: (k,d) => { try { return JSON.parse(localStorage.getItem("cartero."+k)) ?? d; } catch { return d; } }, set: (k,v) => localStorage.setItem("cartero."+k, JSON.stringify(v)) };
 
-let me = LS.get("identity"), cfg = LS.get("config"), contacts = LS.get("contacts", {});
+// Everything secret (identity private key + GitHub token) lives ONLY inside an encrypted vault
+// (PBKDF2 -> AES-GCM, same as the CLI). The passphrase is held in memory for the session and never
+// stored. localStorage only ever holds the ciphertext.
+let me = null, cfg = null, contacts = {}, vaultPass = null;
 let current = null, currentSub = null, seen = new Set();
+const vaultBlob = () => { try { return JSON.parse(localStorage.getItem("cartero.vault")); } catch { return null; } };
+async function saveVault() { localStorage.setItem("cartero.vault", JSON.stringify(await sealSecret({ identity: me, config: cfg, contacts }, vaultPass))); }
 
 const myOut = () => outbox({ host: cfg.host, owner: cfg.owner, repo: cfg.repo, token: cfg.token });
 const peerOut = (uri) => { const u = parseUri(uri); return outbox({ host: u.host, owner: u.owner, repo: u.repo, token: cfg.token }); };
@@ -80,18 +93,31 @@ async function chainOf(out, chat) { const mine = (await out.readChat(chat)).filt
 
 // --- setup ---
 async function doSetup() {
-  const token = $("s-token").value.trim(), slug = $("s-repo").value.trim(), name = $("s-name").value.trim();
+  const token = $("s-token").value.trim(), slug = $("s-repo").value.trim(), name = $("s-name").value.trim(), pass = $("s-pass").value;
   if (!token || !slug.includes("/")) return alert("token y owner/repo son obligatorios");
+  if (pass.length < 8) return alert("la passphrase debe tener al menos 8 caracteres");
   $("s-go").disabled = true; $("s-go").textContent = "creando…";
   try {
     const [owner, repo] = slug.split("/");
     cfg = { host: "github.com", owner, repo, token };
     me = await createIdentity(name);
     await myOut().publishIdentity(await publicIdentityDoc(me));
-    LS.set("identity", me); LS.set("config", cfg);
+    vaultPass = pass; contacts = {}; await saveVault();
     boot();
   } catch (e) { alert("error: " + e.message); $("s-go").disabled = false; $("s-go").textContent = "Crear identidad y publicar"; }
 }
+
+// Unlock an existing vault with the passphrase (kept in memory for the session).
+async function doUnlock() {
+  const pass = $("u-pass").value;
+  $("u-go").disabled = true; $("u-go").textContent = "abriendo…";
+  try {
+    const v = await openSecret(vaultBlob(), pass);   // throws on wrong passphrase
+    me = v.identity; cfg = v.config; contacts = v.contacts || {}; vaultPass = pass;
+    $("unlock").hidden = true; boot();
+  } catch (e) { alert("passphrase incorrecta"); $("u-go").disabled = false; $("u-go").textContent = "Abrir"; }
+}
+function lock() { me = cfg = vaultPass = null; contacts = {}; location.reload(); }
 
 // --- contacts ---
 function renderContacts() {
@@ -106,7 +132,7 @@ async function addContact() {
     const doc = await peerOut(uri.trim()).readIdentity(u.id);
     if (!doc || doc.id !== u.id) return alert("no se pudo resolver/verificar esa identidad");
     const name = prompt("Nombre local (petname):", doc.display_name || u.id.slice(0,6)) || u.id.slice(0,6);
-    contacts[name] = { id: doc.id, uri: uri.trim() }; LS.set("contacts", contacts); renderContacts();
+    contacts[name] = { id: doc.id, uri: uri.trim() }; await saveVault(); renderContacts();
     alert("Verificá fuera de banda que esta huella es suya:\n" + doc.id);
   } catch (e) { alert("error: " + e.message); }
 }
@@ -177,12 +203,16 @@ async function send() {
 
 // --- boot ---
 function boot() {
-  if (!me || !cfg) { $("setup").hidden = false; $("app").hidden = true; $("s-go").onclick = doSetup; return; }
-  $("setup").hidden = true; $("app").hidden = false;
+  if (!me || !cfg) {                                    // locked: a vault exists -> unlock; else -> setup
+    if (vaultBlob()) { $("unlock").hidden = false; $("setup").hidden = true; $("app").hidden = true; $("u-go").onclick = doUnlock; $("u-pass").addEventListener("keydown", e => { if (e.key === "Enter") doUnlock(); }); $("u-pass").focus(); }
+    else { $("setup").hidden = false; $("unlock").hidden = true; $("app").hidden = true; $("s-go").onclick = doSetup; }
+    return;
+  }
+  $("setup").hidden = true; $("unlock").hidden = true; $("app").hidden = false;
   $("me-name").textContent = me.display_name || me.id.slice(0,8);
   const uri = `postal://${cfg.host}/${cfg.owner}/${cfg.repo}#${me.id}`;
   $("me-uri").textContent = uri; $("me-uri").onclick = () => { navigator.clipboard?.writeText(uri); $("me-uri").textContent = "¡copiada!"; setTimeout(()=>$("me-uri").textContent=uri, 1000); };
-  $("add").onclick = addContact; $("send").onclick = send;
+  $("add").onclick = addContact; $("send").onclick = send; $("lock").onclick = lock;
   $("box").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
   $("attach").onclick = () => $("file").click();
   $("file").onchange = () => { if ($("file").files[0]) send(); };

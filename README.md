@@ -41,9 +41,11 @@ Un cliente de navegador para DMs: `node web/server.mjs` → http://localhost:876
 hace **todo** (genera la identidad, firma/sella, habla con GitHub con tu token y con el relay);
 el server solo sirve archivos estáticos y no guarda secretos. Reusa los mismos módulos
 (`src/convo.js`, `src/outbox.js`, `src/attach.js`) que el CLI — son browser-compatibles. Setup
-con token + outbox, agregás contactos por URI, enviás/recibís DMs (con adjuntos), y el relay da
-entrega instantánea. *MVP:* la clave privada y el token viven en `localStorage` (riesgo de XSS;
-usá un token de alcance mínimo).
+con token + outbox + **passphrase**, agregás contactos por URI, enviás/recibís DMs (con adjuntos),
+y el relay da entrega instantánea. **Secretos cifrados en reposo:** la identidad (clave privada) y
+el token se guardan en un **vault** (PBKDF2 → AES-256-GCM con tu passphrase); en `localStorage` solo
+queda el ciphertext, y la passphrase se pide cada sesión (nunca se almacena). Usá un token de
+alcance mínimo igual.
 
 ### Handles `user@domain` (F2)
 
