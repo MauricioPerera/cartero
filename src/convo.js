@@ -64,6 +64,7 @@ export async function openDm(ev, me) {
 export async function verifyDm(ev, { directory, seenPaths } = {}) {
   const reasons = [];
   if (ev.kind !== "dm") reasons.push("not-dm");
+  if (!/^[A-Za-z0-9_-]+$/.test(ev.id || "")) reasons.push("bad-id");   // defense-in-depth: no HTML/inject chars
   const oneRecipient = Array.isArray(ev.to) && ev.to.length === 1;
   if (!oneRecipient) reasons.push("dm-needs-one-recipient");
   else if (ev.from === ev.to[0]) reasons.push("self-dm");

@@ -289,7 +289,8 @@ async function deviceAdd(args) {
   const file = flag(args, "out") || `cartero-device-${name || "device"}.json`;
   await writeFile(file, JSON.stringify(bundle, null, 2));
   console.log(`✓ device "${name || "device"}" certified + published`);
-  console.log(`  move ${file} to the new device and run (with its own CARTERO_HOME + passphrase):\n  cartero device import ${file}`);
+  console.log(`  ⚠ ${file} contains a PRIVATE KEY in cleartext — move it over a secure channel and DELETE it after importing.`);
+  console.log(`  on the new device (its own CARTERO_HOME + passphrase):\n  cartero device import ${file}`);
 }
 async function deviceImport(args) {
   const [file] = positional(args.slice(2));

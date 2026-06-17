@@ -17,7 +17,7 @@ export function relayServer({ port = 0, host } = {}) {
       res.write(":ok\n\n");
       if (!subs.has(chat)) subs.set(chat, new Set());
       subs.get(chat).add(res);
-      req.on("close", () => subs.get(chat)?.delete(res));
+      req.on("close", () => { const s = subs.get(chat); if (s) { s.delete(res); if (!s.size) subs.delete(chat); } });
       return;
     }
     if (req.method === "POST" && url.pathname === "/pub") {

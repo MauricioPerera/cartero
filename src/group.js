@@ -75,6 +75,7 @@ export async function openGm(ev, me) {
 export async function verifyGm(ev, { groupDoc, directory, seenPaths } = {}) {
   const reasons = [];
   if (ev.kind !== "gm") reasons.push("not-gm");
+  if (!/^[A-Za-z0-9_-]+$/.test(ev.id || "")) reasons.push("bad-id");   // defense-in-depth: no HTML/inject chars
   if (!groupDoc || ev.chat_id !== groupDoc.id) reasons.push("wrong-group");
   else if (!groupDoc.members.includes(ev.from)) reasons.push("author-not-member");
   const members = groupDoc ? groupDoc.members.map((id) => ({ id })) : undefined;

@@ -137,7 +137,7 @@ async function refresh() {
 }
 function renderMsg(m) {
   const who = m.mine ? "vos" : esc(current);
-  const atts = m.attachments.map((a,i) => `<a class="att" href="#" data-att="${m.id}:${i}">📎 ${esc(a.name)}</a>`).join("");
+  const atts = m.attachments.map((a,i) => `<a class="att" href="#" data-att="${esc(m.id)}:${i}">📎 ${esc(a.name)}</a>`).join("");
   return `<div class="m ${m.mine?'mine':''}"><div class="meta">${who} · ${esc(m.at.slice(11,16))}</div>${esc(m.text||"")}${atts}</div>`;
 }
 function bindAttachments(c) {

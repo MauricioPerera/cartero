@@ -48,6 +48,11 @@ ok("wrong chat_id rejected (sig still valid)", (await verifyDm(wrongChat, { dire
 const selfDm = await buildEvent(alice, { kind: "dm", chat_id: await deriveChatId(alice.id, alice.id), to: [alice.id], created_at: T(3), rnd: "s", body: {}, seq: 0, prev: null });
 ok("self-dm rejected", (await verifyDm(selfDm, { directory })).reasons.includes("self-dm"));
 ok("unknown author rejected (not in directory)", (await verifyDm(ev, { directory: {} })).reasons.includes("unknown-author"));
+// XSS defense-in-depth: an event id with HTML/inject chars (attacker controls the rnd suffix) is
+// rejected by the gate before it can reach a renderer, even though its signature is valid.
+const evil = await buildDm(alice, bob.id, { text: "x", reply_to: null, attachments: [] },
+  { created_at: T(2), rnd: 'a"><img src=x onerror=alert(1)>', seq: 0, prev: null, directory });
+ok("an id with HTML chars is rejected (bad-id)", (await verifyDm(evil, { directory })).reasons.includes("bad-id"));
 
 console.log("# attachments: encrypt -> hash-address -> verify -> decrypt");
 const fileBytes = new Uint8Array([0x25, 0x50, 0x44, 0x46, 1, 2, 3, 250, 99]); // pretend a small file
