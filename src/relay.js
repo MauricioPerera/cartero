@@ -10,7 +10,7 @@
 
 import { createServer } from "node:http";
 
-export function relayServer({ port = 0 } = {}) {
+export function relayServer({ port = 0, host } = {}) {
   const subs = new Map();                                  // chat_id -> Set(res)
   const server = createServer((req, res) => {
     const url = new URL(req.url, "http://x");
@@ -36,7 +36,7 @@ export function relayServer({ port = 0 } = {}) {
     }
     res.writeHead(404); res.end();
   });
-  return new Promise((resolve) => server.listen(port, () => {
+  return new Promise((resolve) => server.listen(port, host, () => {
     const p = server.address().port;
     resolve({ port: p, url: `http://localhost:${p}`, close: () => new Promise((r) => server.close(r)) });
   }));
