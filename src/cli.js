@@ -27,9 +27,9 @@ const token = () => process.env.GH_TOKEN || die("set GH_TOKEN (a GitHub token wi
 const flag = (args, name) => { const i = args.indexOf("--" + name); return i >= 0 ? args[i + 1] : null; };
 const positional = (args) => args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1].startsWith("--")));
 
-// Default relay (the deployed public one). Override with --relay <url>, disable with --no-relay.
-const DEFAULT_RELAY = process.env.CARTERO_RELAY || "https://cartero.ardf.dev";
-const relayUrl = (args) => args.includes("--no-relay") ? null : (flag(args, "relay") || DEFAULT_RELAY);
+// Relay is OPT-IN / self-hosted by default: no third-party relay unless you point at one with
+// --relay <url> or $CARTERO_RELAY. With none set, delivery is git-only (async). --no-relay forces off.
+const relayUrl = (args) => args.includes("--no-relay") ? null : (flag(args, "relay") || process.env.CARTERO_RELAY || null);
 
 const myOutbox = (cfg) => outbox({ host: cfg.host, owner: cfg.owner, repo: cfg.repo, token: token() });
 const peerOutbox = (uri) => { const u = parseUri(uri); return outbox({ host: u.host, owner: u.owner, repo: u.repo, token: token() }); };

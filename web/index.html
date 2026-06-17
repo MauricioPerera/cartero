@@ -36,6 +36,7 @@
   <label>Tu outbox — owner/repo</label><input id="s-repo" placeholder="usuario/cartero-outbox">
   <label>Nombre para mostrar</label><input id="s-name" placeholder="Alice">
   <label>Passphrase (cifra tu identidad + token en este navegador)</label><input id="s-pass" type="password" autocomplete="new-password">
+  <label>Relay URL (opcional — el tuyo, para entrega instantánea)</label><input id="s-relay" placeholder="https://relay.tu-dominio.dev">
   <button class="btn" id="s-go">Crear identidad y publicar</button>
   <p class="warn" style="margin-top:14px">Tu clave privada y el token se guardan <b>cifrados</b> (AES-GCM con tu passphrase); en localStorage solo queda el cifrado. La passphrase no se guarda — la pedimos cada sesión. Usá un token de alcance mínimo.</p>
 </div>
@@ -74,7 +75,7 @@ import { parseUri } from "/src/uri.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "/src/relay.js";
 import { sealSecret, openSecret } from "/src/secret.js";
 
-const RELAY = "https://cartero.ardf.dev";
+const relayUrl = () => (cfg && cfg.relay) || null;   // opt-in: only if you configured one (self-hosted)
 const $ = (id) => document.getElementById(id);
 const esc = (v) => String(v==null?"":v).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 
@@ -99,7 +100,7 @@ async function doSetup() {
   $("s-go").disabled = true; $("s-go").textContent = "creando…";
   try {
     const [owner, repo] = slug.split("/");
-    cfg = { host: "github.com", owner, repo, token };
+    cfg = { host: "github.com", owner, repo, token, relay: ($("s-relay").value || "").trim() || null };
     me = await createIdentity(name);
     await myOut().publishIdentity(await publicIdentityDoc(me));
     vaultPass = pass; contacts = {}; await saveVault();
@@ -143,8 +144,9 @@ async function selectContact(name) {
   if (currentSub) { currentSub.abort(); currentSub = null; }
   await refresh();
   const c = contacts[name], chat = await deriveChatId(me.id, c.id);
+  const r = relayUrl(); if (!r) return;          // no relay configured -> git polling only
   const ac = new AbortController(); currentSub = ac;
-  relaySubscribe(RELAY, chat, async (ev) => {   // live: gate every relayed event
+  relaySubscribe(r, chat, async (ev) => {        // live: gate every relayed event
     const dir = await directoryFor(c);
     if (!(await verifyDm(ev, { directory: dir })).ok || seen.has(ev.id)) return;
     await refresh();
@@ -193,7 +195,7 @@ async function send() {
     const ch = await chainOf(out, chat);
     const ev = await buildDm(me, c.id, { text, reply_to: null, attachments }, { created_at: new Date().toISOString(), rnd: Math.random().toString(36).slice(2,8), seq: ch.seq, prev: ch.prev, directory: dir });
     await out.appendEvent({ path: eventPath(chat, ev), event: ev }, blobFiles);
-    relayPublish(RELAY, chat, ev).catch(()=>{});
+    { const r = relayUrl(); if (r) relayPublish(r, chat, ev).catch(()=>{}); }
     await refresh();
     setTimeout(() => refresh().catch(()=>{}), 2000);   // GitHub read-after-write is eventually consistent
     setTimeout(() => refresh().catch(()=>{}), 5000);

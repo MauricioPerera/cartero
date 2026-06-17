@@ -1,5 +1,7 @@
 # Cartero
 
+[![CI](https://github.com/MauricioPerera/cartero/actions/workflows/ci.yml/badge.svg)](https://github.com/MauricioPerera/cartero/actions/workflows/ci.yml)
+
 **A sovereign, end-to-end-encrypted messenger that runs on git.** Your identity is a key, your
 mailbox is a git repo you can migrate, and any client that speaks the protocol works. No
 messaging server to trust, no phone number, no provider that can deplatform you without you
@@ -62,10 +64,11 @@ cartero watch bob                                   # poll every 3s + instant re
 ```
 
 `CARTERO_HOME` selects a separate local state dir (handy for running several identities on one
-machine). The relay defaults to `https://cartero.ardf.dev`; override with `--relay <url>` /
-`$CARTERO_RELAY`, or `--no-relay` to disable. **Heads-up:** with the default relay, your
-(sealed) events are forwarded through a third-party host — self-host the relay (see
-[`deploy/`](deploy/)) for full sovereignty.
+machine). **The relay is opt-in / self-hosted by default:** with no relay set, delivery is
+git-only (async, ~2–5 s). For instant delivery, run your own relay (see [`deploy/`](deploy/)) and
+point at it with `--relay <url>` or `$CARTERO_RELAY`. The relay is an untrusted forwarder
+(ciphertext; recipients gate every event), so it never needs your trust — but pointing at a
+third party's relay still exposes routing metadata to them, hence the self-host default.
 
 ### Groups
 
