@@ -16,6 +16,7 @@ import { buildDm, deriveChatId, resolveConversation, verifyDm, openDm } from "./
 import { buildGroupDoc, verifyGroupDoc, buildGm, resolveGroup as resolveGroupItems } from "./group.js";
 import { buildDeviceCert } from "./device.js";
 import { buildRegistryRecord, publishToRegistry, resolveId } from "./registry.js";
+import { summarizeInbox, preview } from "./inbox.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "./relay.js";
 import { encryptFile, decryptFile, makeDescriptor } from "./attach.js";
 import { parseUri } from "./uri.js";
@@ -328,16 +329,53 @@ async function cmdRegister(args) {
   console.log(`  others can now add you with:  cartero contact add ${identity.id} --registry ${reg}`);
 }
 
+// --- inbox: aggregate every conversation (contacts + groups) across all outboxes ----------
+async function dmThread(identity, cfg, name, contact) {
+  const peerO = peerOutbox(contact.uri);
+  const peerDoc = await peerO.readIdentity(contact.id);
+  if (!peerDoc) return { name, kind: "dm", messages: [] };
+  peerDoc.devices = await peerO.readDevices();
+  const myDoc = await publicIdentityDoc(identity); myDoc.devices = await myOutbox(cfg).readDevices();
+  const directory = { [identity.id]: myDoc, [peerDoc.id]: peerDoc };
+  const chat = await deriveChatId(identity.id, peerDoc.id);
+  const items = [...await myOutbox(cfg).readChat(chat), ...await peerO.readChat(chat)];
+  return { name, kind: "dm", messages: await resolveConversation(items, identity, { directory }) };
+}
+async function groupThread(identity, name) {
+  const doc = await state.resolveGroup(name);
+  const directory = await groupDirectory(doc);
+  const merged = [];
+  for (const [id, ob] of Object.entries(doc.roster || {})) merged.push(...await outboxFromUri(ob, id).readChat(doc.id));
+  return { name, kind: "group", messages: await resolveGroupItems(merged, identity, { groupDoc: doc, directory }) };
+}
+async function cmdInbox() {
+  const identity = await state.loadIdentity(pass());     // decrypt once; fan out the reads in parallel
+  const cfg = await state.loadConfig() || die("run `cartero init` first");
+  const contacts = await state.loadContacts(), groups = await state.loadGroups();
+  const threads = await Promise.all([
+    ...Object.entries(contacts).map(([n, c]) => dmThread(identity, cfg, n, c).catch(() => ({ name: n, kind: "dm", messages: [] }))),
+    ...Object.keys(groups).map((n) => groupThread(identity, n).catch(() => ({ name: n, kind: "group", messages: [] }))),
+  ]);
+  const summary = summarizeInbox(threads);
+  if (!summary.length) return console.log("(inbox vacío — agregá contactos o grupos)");
+  for (const s of summary) {
+    const tag = s.kind === "group" ? "#" : "@";
+    const unread = s.unreadable ? `  🔒${s.unreadable}` : "";
+    console.log(`${s.last.at.slice(11, 16)}  ${(tag + s.name).padEnd(14)}  ${preview(s.last)}${unread}`);
+  }
+}
+
 const [cmd, sub] = process.argv.slice(2);
 const args = process.argv.slice(2);
 try {
   if (cmd === "init") await cmdInit(args);
   else if (cmd === "register") await cmdRegister(args);
+  else if (cmd === "inbox") await cmdInbox();
   else if (cmd === "contact" && sub === "add") await cmdContactAdd(args);
   else if (cmd === "send") await cmdSend(args);
   else if (cmd === "read") await cmdRead(args);
   else if (cmd === "watch") await cmdWatch(args);
   else if (cmd === "group") await cmdGroup(args);
   else if (cmd === "device") await cmdDevice(args);
-  else die("commands: init · register · contact add · send · read · watch · group · device");
+  else die("commands: init · register · inbox · contact add · send · read · watch · group · device");
 } catch (e) { die(e.message); }

@@ -59,6 +59,7 @@ export CARTERO_PASS=<your-passphrase> # encrypts your identity at rest (~/.carte
 cartero init <owner/repo> --name "Alice"            # create identity + outbox, print your URI
 cartero contact add <uri | user@domain> bob         # resolve + verify a contact, save "bob"
 cartero send bob "hi 👋" [--file ./doc.pdf]          # send a sealed DM (optional attachment)
+cartero inbox                                       # unified view: every conversation (DMs + groups), latest first
 cartero read bob [--save ./downloads]               # print the conversation (merge of both outboxes)
 cartero watch bob                                   # poll every 3s + instant relay delivery
 ```
@@ -157,9 +158,8 @@ Honest, by design:
 
 `SPEC-F0` (contract) · F1 MVP (DMs, attachments, CLI) · F2 handles + relay · F3 groups +
 multi-device + web UI · F4 **discovery registry** (`id → repo`) — **done & deployed**. Remaining
-in F4 and beyond: a multi-repo aggregator (a federated timeline; per-conversation merge already
-covers DM/group) and an independent security review. (Canonicalization is now pinned to
-RFC 8785 / JCS in postal.)
+in F4 and beyond: an **independent security review** (the big one). Done in F4: discovery
+registry, the `inbox` multi-repo aggregator, and pinning canonicalization to RFC 8785 / JCS.
 
 ## License
 

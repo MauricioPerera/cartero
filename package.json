@@ -11,6 +11,6 @@
     "cartero": "src/cli.js"
   },
   "scripts": {
-    "test": "node test/cartero.test.mjs && node test/handle.test.mjs && node test/relay.test.mjs && node test/group.test.mjs && node test/device.test.mjs && node test/multidevice.test.mjs && node test/registry.test.mjs"
+    "test": "node test/cartero.test.mjs && node test/handle.test.mjs && node test/relay.test.mjs && node test/group.test.mjs && node test/device.test.mjs && node test/multidevice.test.mjs && node test/registry.test.mjs && node test/inbox.test.mjs"
   }
 }
