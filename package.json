@@ -8,6 +8,6 @@
     "cartero": "src/cli.js"
   },
   "scripts": {
-    "test": "node test/cartero.test.mjs && node test/handle.test.mjs && node test/relay.test.mjs"
+    "test": "node test/cartero.test.mjs && node test/handle.test.mjs && node test/relay.test.mjs && node test/group.test.mjs"
   }
 }

@@ -67,6 +67,16 @@ GH_TOKEN=$(gh auth token) GH_OWNER=<o> GH_REPO_A=<a> GH_REPO_B=<b> \
   node test/integration.test.mjs                        # integración (red)
 ```
 
+### Grupos (F3 — núcleo)
+
+Un grupo es un **doc firmado por el creador** (`{ id, name, creator, members[], sig }`); los
+mensajes (`kind:"gm"`) van **sellados a todos los miembros** y cada uno postea a **su propio
+outbox** bajo el id del grupo (federado, sin escritura compartida); leer = el merge de los
+outboxes de los miembros. Probado (`test/group.test.mjs`, 15/0): doc firmado, sellado a N (todos
+leen, un tercero no), gate (no-miembro / grupo-equivocado), merge causal, miembro removido
+descartado. *Límites:* membresía gestionada por el creador (sin quórum), sin forward secrecy al
+remover. Falta el cableo CLI/outbox y multi-dispositivo/UI (resto de F3).
+
 ## Límites honestos (MVP)
 
 Metadatos no ocultos (el sobre expone `from`/`to`) · una clave por dispositivo · handles
