@@ -1,0 +1,3 @@
+[submodule "vendor/postal"]
+	path = vendor/postal
+	url = https://github.com/MauricioPerera/postal.git

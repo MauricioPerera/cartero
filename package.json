@@ -1,0 +1,10 @@
+{
+  "name": "cartero",
+  "version": "0.0.1",
+  "type": "module",
+  "description": "Sovereign E2EE messenger over git, on the Postal protocol (MVP F1: 1:1 DM).",
+  "license": "MIT",
+  "scripts": {
+    "test": "node test/cartero.test.mjs"
+  }
+}
