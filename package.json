@@ -5,7 +5,7 @@
   "description": "Sovereign, end-to-end-encrypted messenger over git (DMs, groups, multi-device), on the Postal protocol.",
   "license": "MIT",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "bin": {
     "cartero": "src/cli.js"

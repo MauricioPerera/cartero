@@ -9,7 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node: [18, 20, 22]
+        node: [20, 22]            # globalThis.crypto (WebCrypto) is stable as a global from Node 20
     steps:
       - uses: actions/checkout@v4
         with:

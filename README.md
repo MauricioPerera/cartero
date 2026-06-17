@@ -27,7 +27,7 @@ sequencer. The contract is specified in [`SPEC-F0.md`](SPEC-F0.md).
 
 ## Getting started
 
-**Prerequisites:** Node.js **≥ 18**, git, and a GitHub account + token with access to a repo you
+**Prerequisites:** Node.js **≥ 20** (for global WebCrypto), git, and a GitHub account + token with access to a repo you
 own (your outbox). No `npm install` needed — there are no runtime dependencies beyond the
 submodule.
 
