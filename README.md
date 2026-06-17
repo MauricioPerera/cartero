@@ -139,8 +139,8 @@ real GitHub transport.
 
 Honest, by design:
 
-- **Not audited.** See the warning above. The canonical-JSON used for signing is not yet pinned to
-  a formal standard (JCS/RFC 8785), so cross-implementation interop isn't guaranteed yet.
+- **Not audited.** See the warning above. (Signing uses **RFC 8785 / JCS** canonicalization,
+  conformance-tested in postal, so signatures interoperate with any conformant implementation.)
 - **Metadata is not hidden.** Content is sealed (E2EE), but the signed envelope exposes
   `from`/`to`, and a host with read access sees who talks to whom and when. Anonymous sealing hides
   recipients *inside* the envelope, not the event fields. Hiding the social graph needs more
@@ -158,8 +158,8 @@ Honest, by design:
 `SPEC-F0` (contract) · F1 MVP (DMs, attachments, CLI) · F2 handles + relay · F3 groups +
 multi-device + web UI · F4 **discovery registry** (`id → repo`) — **done & deployed**. Remaining
 in F4 and beyond: a multi-repo aggregator (a federated timeline; per-conversation merge already
-covers DM/group), pinning the canonical form (JCS/RFC 8785) for cross-implementation interop, and
-an independent security review.
+covers DM/group) and an independent security review. (Canonicalization is now pinned to
+RFC 8785 / JCS in postal.)
 
 ## License
 
