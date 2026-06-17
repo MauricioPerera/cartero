@@ -13,6 +13,7 @@ import { basename, join } from "node:path";
 import { createIdentity, publicIdentityDoc, eventHash } from "../vendor/postal/src/postal.js";
 import { outbox, eventPath } from "./outbox.js";
 import { buildDm, deriveChatId, resolveConversation, verifyDm, openDm } from "./convo.js";
+import { buildGroupDoc, verifyGroupDoc, buildGm, resolveGroup as resolveGroupItems } from "./group.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "./relay.js";
 import { encryptFile, decryptFile, makeDescriptor } from "./attach.js";
 import { parseUri } from "./uri.js";
@@ -178,6 +179,97 @@ async function cmdWatch(args) {
   }
 }
 
+// --- groups (F3) -----------------------------------------------------------
+const outboxFromUri = (uri, id) => { const u = parseUri(uri.includes("#") ? uri : `${uri}#${id}`); return outbox({ host: u.host, owner: u.owner, repo: u.repo, token: token() }); };
+
+// Build the directory (id -> verified identity doc) by reading each member's outbox via the roster.
+async function groupDirectory(doc) {
+  const dir = {};
+  for (const [id, ob] of Object.entries(doc.roster || {})) {
+    const d = await outboxFromUri(ob, id).readIdentity(id);
+    if (d) dir[id] = d;
+  }
+  return dir;
+}
+const nameOf = (directory, id, myId) => id === myId ? "you" : ((directory[id] && directory[id].display_name) || id.slice(0, 8));
+
+// Encrypt a file into an attachment descriptor + blob (shared by DM and group send).
+async function attachOne(file, out) {
+  const bytes = new Uint8Array(await readFile(file));
+  const enc = await encryptFile(bytes);
+  return { desc: makeDescriptor({ name: basename(file), mime: "application/octet-stream", size: bytes.length, hash: enc.hash, key: enc.key }), blob: out.blobFile(enc.hash, enc.ct) };
+}
+
+async function groupCreate(args) {
+  const pos = positional(args.slice(2));                  // [name, petname...]
+  const name = pos[0], petnames = pos.slice(1);
+  if (!name || !petnames.length) die("usage: cartero group create <name> <petname...>");
+  const identity = await state.loadIdentity(pass());
+  const cfg = await state.loadConfig() || die("run `cartero init` first");
+  const myUri = `postal://${cfg.host}/${cfg.owner}/${cfg.repo}`;
+  const roster = { [identity.id]: myUri }, members = [identity.id];
+  for (const pn of petnames) { const c = await state.resolveContact(pn); const u = parseUri(c.uri); roster[c.id] = `postal://${u.host}/${u.owner}/${u.repo}`; members.push(c.id); }
+  const doc = await buildGroupDoc(identity, { name, members, roster, created_at: new Date().toISOString(), rnd: Math.random().toString(36).slice(2, 8) });
+  await myOutbox(cfg).publishGroup(doc);
+  await state.saveGroup(name, doc);
+  console.log(`✓ group "${name}" created: ${doc.id} (${members.length} members)`);
+  console.log(`  members join with:\n  cartero group join ${myUri}#${identity.id} ${doc.id}`);
+}
+
+async function groupJoin(args) {
+  const [creatorUri, groupId, localname] = positional(args.slice(2));
+  if (!creatorUri || !groupId) die("usage: cartero group join <creator-outbox-uri> <group-id> [localname]");
+  const doc = await outboxFromUri(creatorUri, parseUri(creatorUri).id).readGroup(groupId) || die("group doc not found in that outbox");
+  if (!(await verifyGroupDoc(doc, { directory: await groupDirectory(doc) }))) die("group doc failed verification");
+  const name = localname || doc.name || groupId.slice(0, 12);
+  await state.saveGroup(name, doc);
+  console.log(`✓ joined group "${name}" (${doc.id}), ${doc.members.length} members`);
+}
+
+async function groupSend(args) {
+  const pos = positional(args.slice(2));
+  const name = pos[0], text = pos.slice(1).join(" "), file = flag(args, "file");
+  if (!name || (!text && !file)) die("usage: cartero group send <name> <text> [--file path]");
+  const identity = await state.loadIdentity(pass());
+  const cfg = await state.loadConfig() || die("run `cartero init` first");
+  const doc = await state.resolveGroup(name);
+  const directory = await groupDirectory(doc);
+  directory[identity.id] = await publicIdentityDoc(identity);
+  const out = myOutbox(cfg);
+  const attachments = [], blobFiles = [];
+  if (file) { const a = await attachOne(file, out); attachments.push(a.desc); blobFiles.push(a.blob); }
+  const c = await chainOf(out, doc.id, identity.id);
+  const ev = await buildGm(identity, doc, { text, reply_to: null, attachments }, { created_at: new Date().toISOString(), rnd: Math.random().toString(36).slice(2, 8), seq: c.seq, prev: c.prev, directory });
+  await out.appendEvent({ path: eventPath(doc.id, ev), event: ev }, blobFiles);
+  const relay = relayUrl(args); if (relay) await relayPublish(relay, doc.id, ev);
+  console.log("✓ sent to group" + (file ? " (+1 attachment)" : "") + (relay ? " (relayed)" : ""));
+}
+
+async function groupRead(args) {
+  const [name] = positional(args.slice(2));
+  if (!name) die("usage: cartero group read <name>");
+  const identity = await state.loadIdentity(pass());
+  const doc = await state.resolveGroup(name);
+  const directory = await groupDirectory(doc);
+  const merged = [];
+  for (const [id, ob] of Object.entries(doc.roster || {})) merged.push(...await outboxFromUri(ob, id).readChat(doc.id));
+  const convo = await resolveGroupItems(merged, identity, { groupDoc: doc, directory });
+  for (const m of convo) {
+    const who = nameOf(directory, m.from, identity.id);
+    const body = m.readable ? m.text + m.attachments.map((a) => ` [📎 ${a.name}]`).join("") : "🔒(not for you)";
+    console.log(`${m.at.slice(11, 16)}  ${who.padEnd(10)}  ${body}`);
+  }
+}
+
+async function cmdGroup(args) {
+  const sub = args[1];
+  if (sub === "create") return groupCreate(args);
+  if (sub === "join") return groupJoin(args);
+  if (sub === "send") return groupSend(args);
+  if (sub === "read") return groupRead(args);
+  die("usage: cartero group <create|join|send|read> ...");
+}
+
 const [cmd, sub] = process.argv.slice(2);
 const args = process.argv.slice(2);
 try {
@@ -186,5 +278,6 @@ try {
   else if (cmd === "send") await cmdSend(args);
   else if (cmd === "read") await cmdRead(args);
   else if (cmd === "watch") await cmdWatch(args);
-  else die("commands: init · contact add · send · read · watch");
+  else if (cmd === "group") await cmdGroup(args);
+  else die("commands: init · contact add · send · read · watch · group");
 } catch (e) { die(e.message); }

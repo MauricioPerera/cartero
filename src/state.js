@@ -37,4 +37,13 @@ export async function resolveContact(petname) {
   return c;
 }
 
+const groupsFile = join(DIR, "groups.json");     // { localName: <signed group doc with roster> }
+export const loadGroups = () => readJson(groupsFile, {});
+export async function saveGroup(name, doc) { const all = await loadGroups(); all[name] = doc; await writeJson(groupsFile, all); }
+export async function resolveGroup(name) {
+  const g = (await loadGroups())[name];
+  if (!g) throw new Error(`unknown group: ${name}`);
+  return g;
+}
+
 export const stateDir = DIR;

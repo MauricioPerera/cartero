@@ -75,7 +75,16 @@ outbox** bajo el id del grupo (federado, sin escritura compartida); leer = el me
 outboxes de los miembros. Probado (`test/group.test.mjs`, 15/0): doc firmado, sellado a N (todos
 leen, un tercero no), gate (no-miembro / grupo-equivocado), merge causal, miembro removido
 descartado. *Límites:* membresía gestionada por el creador (sin quórum), sin forward secrecy al
-remover. Falta el cableo CLI/outbox y multi-dispositivo/UI (resto de F3).
+remover.
+
+```bash
+cartero group create proyecto bob carol     # crea el grupo con tus contactos, publica el doc firmado
+cartero group join <creator-uri> <group-id> # un miembro se une (baja+verifica el doc del outbox del creador)
+cartero group send proyecto "hola" [--file] # mensaje sellado a todos los miembros
+cartero group read proyecto                 # merge de los outboxes de todos los miembros
+```
+
+Falta de F3: multi-dispositivo (sub-claves por dispositivo) y la UI.
 
 ## Límites honestos (MVP)
 

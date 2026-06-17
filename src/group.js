@@ -19,10 +19,13 @@ const decode = (b) => JSON.parse(decodeURIComponent(escape(atob(b))));
 const stripSig = (d) => { const { sig, ...rest } = d; return rest; };
 const aadOf = (chat_id, from, to, id, created_at) => canonical({ chat_id, from, to: [...to].sort(), id, created_at });
 
-// Create a signed group doc. `members` includes the creator. `rnd` makes the id unique.
-export async function buildGroupDoc(creator, { name = "", members, created_at, rnd }) {
+// Create a signed group doc. `members` includes the creator (ids). Optional `roster` (id->outbox
+// URI) makes the doc self-contained so a joiner can find every member's outbox from one fetch; it
+// is part of the signed payload. `rnd` makes the id unique.
+export async function buildGroupDoc(creator, { name = "", members, roster, created_at, rnd }) {
   const set = [...new Set([creator.id, ...members])].sort();
   const doc = { v: 1, id: `grp_${creator.id}_${rnd}`, name: String(name), creator: creator.id, members: set, created_at };
+  if (roster) doc.roster = roster;
   doc.sig = await sign(await importSignPrivate(creator.sign.privateJwk), canonical(stripSig(doc)));
   return doc;
 }

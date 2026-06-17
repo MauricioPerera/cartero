@@ -36,6 +36,10 @@ export function outbox({ host = "github.com", owner, repo, token, branch = "main
         `cartero: dm ${item.event.id}`);
     },
 
+    // Group docs published in this outbox (so members can fetch the signed roster).
+    async publishGroup(doc) { await client.putFile(`.postal/groups/${doc.id}.json`, JSON.stringify(doc, null, 2), `cartero: group ${doc.id}`); },
+    async readGroup(id) { const f = await client.getFile(`.postal/groups/${id}.json`); if (!f) return null; try { return JSON.parse(f.content); } catch { return null; } },
+
     // Read all events of a chat from THIS outbox. items: [{ path, event }].
     async readChat(chat_id) {
       const prefix = `.postal/chats/${chat_id}/events/`;
