@@ -94,7 +94,24 @@ cartero group send proyecto "hola" [--file] # mensaje sellado a todos los miembr
 cartero group read proyecto                 # merge de los outboxes de todos los miembros
 ```
 
-Falta de F3: multi-dispositivo (sub-claves por dispositivo) y la UI.
+### Multi-dispositivo (F3)
+
+Una identidad (id = la clave maestra) autoriza varios **dispositivos**, cada uno con su PROPIA
+clave: el maestro firma un **cert** por dispositivo. Un dispositivo actúa COMO la identidad
+(`from` = id maestro, firmado por la clave del dispositivo); el gate acepta la firma si coincide
+con cualquier clave autorizada. Los mensajes se sellan a **todas** las claves del destinatario
+(maestro + dispositivos), así cualquiera de tus dispositivos lee. Sin tocar postal core.
+
+```bash
+cartero device add phone --out bob-phone.json   # en tu equipo con la clave maestra: certifica + publica
+cartero device import bob-phone.json             # en el equipo nuevo (CARTERO_HOME propio): queda como vos
+```
+
+Probado: `device.test` 12/0 (certs/derivación) · `multidevice.test` 10/0 (un dispositivo lee y
+**envía como su dueño**, gate acepta autorizados y rechaza suplantación) · smoke CLI contra repos
+reales (el teléfono lee lo sellado a él y envía firmando; alice lo acepta). *Límites:* el maestro
+gestiona los dispositivos (sin lista de revocación por dispositivo aún); mensajes sellados **antes**
+de agregar un dispositivo no son legibles por él (no hay acceso retroactivo).
 
 ## Límites honestos (MVP)
 

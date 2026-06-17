@@ -14,6 +14,7 @@ import { createIdentity, publicIdentityDoc, eventHash } from "../vendor/postal/s
 import { outbox, eventPath } from "./outbox.js";
 import { buildDm, deriveChatId, resolveConversation, verifyDm, openDm } from "./convo.js";
 import { buildGroupDoc, verifyGroupDoc, buildGm, resolveGroup as resolveGroupItems } from "./group.js";
+import { buildDeviceCert } from "./device.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "./relay.js";
 import { encryptFile, decryptFile, makeDescriptor } from "./attach.js";
 import { parseUri } from "./uri.js";
@@ -44,8 +45,11 @@ async function context(petname) {
   const identity = await state.loadIdentity(pass());
   const cfg = await state.loadConfig() || die("no outbox config — run `cartero init`");
   const contact = await state.resolveContact(petname);
-  const peerDoc = await peerOutbox(contact.uri).readIdentity(contact.id) || die("cannot resolve peer identity from their outbox");
-  const directory = { [identity.id]: await publicIdentityDoc(identity), [peerDoc.id]: peerDoc };
+  const peerO = peerOutbox(contact.uri);
+  const peerDoc = await peerO.readIdentity(contact.id) || die("cannot resolve peer identity from their outbox");
+  peerDoc.devices = await peerO.readDevices();                       // multi-device: peer's certified devices
+  const myDoc = await publicIdentityDoc(identity); myDoc.devices = await myOutbox(cfg).readDevices();
+  const directory = { [identity.id]: myDoc, [peerDoc.id]: peerDoc };
   return { identity, cfg, contact, peerDoc, directory, chat: await deriveChatId(identity.id, peerDoc.id) };
 }
 
@@ -186,8 +190,9 @@ const outboxFromUri = (uri, id) => { const u = parseUri(uri.includes("#") ? uri 
 async function groupDirectory(doc) {
   const dir = {};
   for (const [id, ob] of Object.entries(doc.roster || {})) {
-    const d = await outboxFromUri(ob, id).readIdentity(id);
-    if (d) dir[id] = d;
+    const o = outboxFromUri(ob, id);
+    const d = await o.readIdentity(id);
+    if (d) { d.devices = await o.readDevices(); dir[id] = d; }       // multi-device: each member's certs
   }
   return dir;
 }
@@ -270,6 +275,38 @@ async function cmdGroup(args) {
   die("usage: cartero group <create|join|send|read> ...");
 }
 
+// --- multi-device (F3) -----------------------------------------------------
+async function deviceAdd(args) {
+  const [name] = positional(args.slice(2));
+  const identity = await state.loadIdentity(pass());      // the master (this device holds the master key)
+  const cfg = await state.loadConfig() || die("run `cartero init` first");
+  const device = await createIdentity(identity.display_name || "");   // a fresh keypair for the new device
+  const cert = await buildDeviceCert(identity, device, { name: name || "device", created_at: new Date().toISOString() });
+  const out = myOutbox(cfg);
+  await out.publishDevices([...(await out.readDevices()), cert]);      // publish so peers seal to it + accept it
+  // The new device acts AS the identity: same id + display name, but the device's OWN keys.
+  const bundle = { identity: { id: identity.id, display_name: identity.display_name, sign: device.sign, enc: device.enc, encHistory: [] }, config: cfg };
+  const file = flag(args, "out") || `cartero-device-${name || "device"}.json`;
+  await writeFile(file, JSON.stringify(bundle, null, 2));
+  console.log(`✓ device "${name || "device"}" certified + published`);
+  console.log(`  move ${file} to the new device and run (with its own CARTERO_HOME + passphrase):\n  cartero device import ${file}`);
+}
+async function deviceImport(args) {
+  const [file] = positional(args.slice(2));
+  if (!file) die("usage: cartero device import <bundle.json>");
+  if (await state.hasIdentity()) die("an identity already exists here — use a fresh CARTERO_HOME");
+  const bundle = JSON.parse(await readFile(file, "utf8"));
+  await state.saveIdentity(bundle.identity, pass());
+  await state.saveConfig(bundle.config);
+  console.log(`✓ device paired — you are ${bundle.identity.id} on this device (your own key, same identity)`);
+}
+async function cmdDevice(args) {
+  const sub = args[1];
+  if (sub === "add") return deviceAdd(args);
+  if (sub === "import") return deviceImport(args);
+  die("usage: cartero device <add [name] | import <bundle.json>>");
+}
+
 const [cmd, sub] = process.argv.slice(2);
 const args = process.argv.slice(2);
 try {
@@ -279,5 +316,6 @@ try {
   else if (cmd === "read") await cmdRead(args);
   else if (cmd === "watch") await cmdWatch(args);
   else if (cmd === "group") await cmdGroup(args);
-  else die("commands: init · contact add · send · read · watch · group");
+  else if (cmd === "device") await cmdDevice(args);
+  else die("commands: init · contact add · send · read · watch · group · device");
 } catch (e) { die(e.message); }

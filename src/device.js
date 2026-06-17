@@ -46,12 +46,29 @@ export async function recipientEncKeys(masterDoc, certs = []) {
   return keys;
 }
 
-// True if `ev` (from = this identity) was signed by an authorized key — master OR a certified
-// device. This is the device-aware signature check; layer it into the gate for multi-device.
-export async function verifyDeviceSignedEvent(ev, masterDoc, certs = []) {
+// The authorized sign pub that actually signed `ev` (master OR a certified device), or null if
+// none — i.e. the device-aware signature check. Returns the KEY so the gate can shim it in.
+export async function signingKeyOf(ev, masterDoc, certs = []) {
   const payload = canonical(signedView(ev));
   for (const k of await authorizedSignKeys(masterDoc, certs)) {
-    try { if (await verify(await importSignPublic(k), ev.sig, payload)) return true; } catch { /* try next */ }
+    try { if (await verify(await importSignPublic(k), ev.sig, payload)) return k; } catch { /* try next */ }
   }
-  return false;
+  return null;
+}
+
+// True if `ev` was signed by any authorized key (master or certified device).
+export async function verifyDeviceSignedEvent(ev, masterDoc, certs = []) {
+  return (await signingKeyOf(ev, masterDoc, certs)) !== null;
+}
+
+// If `ev` was signed by a certified DEVICE of its author (not the master), return a copy of the
+// directory whose author doc presents that device's sign key — so Postal's verifyEvent (which
+// checks the sig against the doc's sign_key) accepts it. Otherwise return the directory unchanged.
+// The author doc may carry `.devices` (the published device certs).
+export async function deviceShim(directory, ev) {
+  const master = directory && directory[ev.from];
+  if (!master) return directory;
+  const signer = await signingKeyOf(ev, master, master.devices || []);
+  if (!signer || signer === master.sign_key.pub) return directory;
+  return { ...directory, [ev.from]: { ...master, sign_key: { alg: "ECDSA-P256", pub: signer }, rotations: [] } };
 }

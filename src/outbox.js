@@ -40,6 +40,10 @@ export function outbox({ host = "github.com", owner, repo, token, branch = "main
     async publishGroup(doc) { await client.putFile(`.postal/groups/${doc.id}.json`, JSON.stringify(doc, null, 2), `cartero: group ${doc.id}`); },
     async readGroup(id) { const f = await client.getFile(`.postal/groups/${id}.json`); if (!f) return null; try { return JSON.parse(f.content); } catch { return null; } },
 
+    // Published device certs for THIS identity (multi-device). The list the gate/sealing consult.
+    async publishDevices(certs) { await client.putFile(`.postal/devices.json`, JSON.stringify(certs, null, 2), `cartero: devices (${certs.length})`); },
+    async readDevices() { const f = await client.getFile(`.postal/devices.json`); if (!f) return []; try { const d = JSON.parse(f.content); return Array.isArray(d) ? d : []; } catch { return []; } },
+
     // Read all events of a chat from THIS outbox. items: [{ path, event }].
     async readChat(chat_id) {
       const prefix = `.postal/chats/${chat_id}/events/`;

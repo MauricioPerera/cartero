@@ -1,13 +1,21 @@
 // Cartero — the 1:1 conversation: chat_id derivation, sealed DM events, the gate, and the
 // two-outbox merge. Built on Postal primitives (SPEC-F0 §3–§5, §8–§9).
 
-import { canonical, sha256, utf8Bytes, sealForRecipients, openSealed } from "../vendor/postal/src/crypto.js";
+import { canonical, sha256, utf8Bytes, sealAnonymous, openAnonymous } from "../vendor/postal/src/crypto.js";
 import { buildEvent, verifyEvent, eventPath, MARKER } from "../vendor/postal/src/postal.js";
 import { canonicalOrder } from "../vendor/postal/src/order.js";
+import { recipientEncKeys, deviceShim } from "./device.js";
 
 const hex = (b) => Array.from(b).map((x) => x.toString(16).padStart(2, "0")).join("");
 const encode = (obj) => btoa(unescape(encodeURIComponent(JSON.stringify(obj))));
 const decode = (b64) => JSON.parse(decodeURIComponent(escape(atob(b64))));
+
+// Enc keys to seal to for an identity: master + every certified device (so any of their devices
+// reads). Falls back to a bare enc pub when no doc is available.
+async function sealKeys(doc, fallbackPub) {
+  if (!doc) return fallbackPub ? [fallbackPub] : [];
+  return recipientEncKeys(doc, doc.devices || []);
+}
 
 // chat_id = "dm_" + first 32 hex of SHA-256(sorted ids joined by "|"). Both parties compute it
 // without coordinating; an outsider can't read the participants from the directory name.
@@ -26,31 +34,33 @@ export async function buildDm(me, peerId, content, { created_at, rnd, seq = null
   const to = [peerId];
   const id = created_at.replace(/[:.]/g, "-") + "_" + me.id + "_" + rnd;   // must match buildEvent's id
   const aad = aadOf(chat_id, me.id, to, id, created_at);
-  const recipients = [
-    { id: me.id, encPublicKey: me.enc.publicKey },                          // seal to self too -> read own sent
-    { id: peerId, encPublicKey: directory[peerId].enc_key.pub },
-  ];
-  const envelope = await sealForRecipients(JSON.stringify(content), recipients, aad);
+  // Seal to BOTH parties' master + device enc keys, so the sender's own devices AND any of the
+  // recipient's devices can read. Anonymous sealing -> the envelope never names the recipients.
+  const pubs = [...new Set([
+    ...await sealKeys(directory[me.id], me.enc && me.enc.publicKey),
+    ...await sealKeys(directory[peerId]),
+  ])];
+  const envelope = await sealAnonymous(JSON.stringify(content), pubs, aad, { keySlots: Math.max(4, pubs.length) });
   const body = { sealed: MARKER + encode(envelope) };
   return buildEvent(me, { kind: "dm", chat_id, to, created_at, rnd, body, seq, prev });
 }
 
-// Decrypt a DM as `me` (current enc key, then rotated-out keys). Returns the content object, or
-// null if not a DM / not addressed to me.
+// Decrypt a DM as `me` (this device's enc key, then rotated-out keys). Anonymous: we trial-unwrap.
 export async function openDm(ev, me) {
   if (ev.kind !== "dm" || !ev.body || String(ev.body.sealed || "").indexOf(MARKER) !== 0) return null;
   const envelope = decode(String(ev.body.sealed).slice(MARKER.length));
   const aad = aadOf(ev.chat_id, ev.from, ev.to, ev.id, ev.created_at);
   let lastErr;
   for (const e of [me.enc, ...(me.encHistory || [])]) {
-    try { return JSON.parse(await openSealed(envelope, me.id, e.privateJwk, aad)); }
+    try { return JSON.parse(await openAnonymous(envelope, e.privateJwk, aad)); }
     catch (err) { lastErr = err; }
   }
   throw lastErr || new Error("cannot open");
 }
 
-// The Cartero gate: Postal's verifyEvent + 4 structural DM rules (SPEC-F0 §8). Membership is
-// structural (the two ids that derive chat_id), so there are no `member` events.
+// The Cartero gate: Postal's verifyEvent + structural DM rules (SPEC-F0 §8), now DEVICE-AWARE: an
+// event may be signed by the master key OR a certified device of `from`. We find the signing key
+// and, if it's a device, shim it into the directory so verifyEvent checks the signature against it.
 export async function verifyDm(ev, { directory, seenPaths } = {}) {
   const reasons = [];
   if (ev.kind !== "dm") reasons.push("not-dm");
@@ -59,7 +69,8 @@ export async function verifyDm(ev, { directory, seenPaths } = {}) {
   else if (ev.from === ev.to[0]) reasons.push("self-dm");
   else if (ev.chat_id !== await deriveChatId(ev.from, ev.to[0])) reasons.push("chat-id-mismatch");
   const members = oneRecipient ? [{ id: ev.from }, { id: ev.to[0] }] : [{ id: ev.from }];
-  const base = await verifyEvent(ev, { directory, seenPaths, members });
+  const dir = await deviceShim(directory, ev);
+  const base = await verifyEvent(ev, { directory: dir, seenPaths, members });
   return { ok: reasons.length === 0 && base.ok, reasons: [...reasons, ...base.reasons] };
 }
 

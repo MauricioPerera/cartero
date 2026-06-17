@@ -10,9 +10,10 @@
 // messages (they were sealed to that member, who can still read the old ones — no forward secrecy);
 // to read you need every member's outbox (resolve them from the directory / their handles).
 
-import { canonical, sha256, utf8Bytes, sealForRecipients, openSealed, importSignPrivate, importSignPublic, sign, verify } from "../vendor/postal/src/crypto.js";
+import { canonical, sha256, utf8Bytes, sealAnonymous, openAnonymous, importSignPrivate, importSignPublic, sign, verify } from "../vendor/postal/src/crypto.js";
 import { buildEvent, verifyEvent, eventPath, MARKER } from "../vendor/postal/src/postal.js";
 import { canonicalOrder } from "../vendor/postal/src/order.js";
+import { recipientEncKeys, deviceShim } from "./device.js";
 
 const encode = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o))));
 const decode = (b) => JSON.parse(decodeURIComponent(escape(atob(b))));
@@ -49,8 +50,11 @@ export async function buildGm(me, groupDoc, content, { created_at, rnd, seq = nu
   const to = groupDoc.members.filter((id) => id !== me.id);
   const id = created_at.replace(/[:.]/g, "-") + "_" + me.id + "_" + rnd;
   const aad = aadOf(chat_id, me.id, to, id, created_at);
-  const recipients = groupDoc.members.map((mid) => ({ id: mid, encPublicKey: directory[mid].enc_key.pub }));
-  const envelope = await sealForRecipients(JSON.stringify(content), recipients, aad);
+  // Seal to EVERY member's master + device enc keys, so any device of any member can read.
+  const pubs = [];
+  for (const mid of groupDoc.members) for (const k of await recipientEncKeys(directory[mid], (directory[mid] || {}).devices || [])) pubs.push(k);
+  const set = [...new Set(pubs)];
+  const envelope = await sealAnonymous(JSON.stringify(content), set, aad, { keySlots: Math.max(4, set.length) });
   return buildEvent(me, { kind: "gm", chat_id, to, created_at, rnd, body: { sealed: MARKER + encode(envelope) }, seq, prev });
 }
 
@@ -60,7 +64,7 @@ export async function openGm(ev, me) {
   const aad = aadOf(ev.chat_id, ev.from, ev.to, ev.id, ev.created_at);
   let lastErr;
   for (const e of [me.enc, ...(me.encHistory || [])]) {
-    try { return JSON.parse(await openSealed(envelope, me.id, e.privateJwk, aad)); }
+    try { return JSON.parse(await openAnonymous(envelope, e.privateJwk, aad)); }
     catch (err) { lastErr = err; }
   }
   throw lastErr || new Error("cannot open");
@@ -74,7 +78,8 @@ export async function verifyGm(ev, { groupDoc, directory, seenPaths } = {}) {
   if (!groupDoc || ev.chat_id !== groupDoc.id) reasons.push("wrong-group");
   else if (!groupDoc.members.includes(ev.from)) reasons.push("author-not-member");
   const members = groupDoc ? groupDoc.members.map((id) => ({ id })) : undefined;
-  const base = await verifyEvent(ev, { directory, seenPaths, members });
+  const dir = await deviceShim(directory, ev);            // accept a certified device's signature
+  const base = await verifyEvent(ev, { directory: dir, seenPaths, members });
   return { ok: reasons.length === 0 && base.ok, reasons: [...reasons, ...base.reasons] };
 }
 
