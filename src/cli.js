@@ -15,6 +15,7 @@ import { outbox, eventPath } from "./outbox.js";
 import { buildDm, deriveChatId, resolveConversation } from "./convo.js";
 import { encryptFile, decryptFile, makeDescriptor } from "./attach.js";
 import { parseUri } from "./uri.js";
+import { resolveHandle, buildHandleDoc, parseHandle } from "./handle.js";
 import * as state from "./state.js";
 
 const die = (m) => { console.error("✗ " + m); process.exit(1); };
@@ -56,17 +57,37 @@ async function cmdInit(args) {
   console.log("✓ identity created and published");
   console.log("  id:   " + identity.id);
   console.log("  share this URI:\n  " + out.uri(identity.id));
+
+  const handle = flag(args, "handle");                 // optional human-readable address
+  if (handle) {
+    const { user, domain } = parseHandle(handle);
+    const hdoc = await buildHandleDoc(identity, { handle, outbox: out.uri(identity.id).split("#")[0] });
+    const wk = flag(args, "well-known");
+    if (wk) { await writeFile(wk, JSON.stringify(hdoc, null, 2)); console.log(`  wrote ${wk}`); }
+    else { console.log(`\n  publish this at https://${domain}/.well-known/postal/${user}.json :\n`); console.log(JSON.stringify(hdoc, null, 2)); }
+    console.log(`\n  then others reach you as: ${handle}`);
+  }
 }
 
 async function cmdContactAdd(args) {
-  const [uri, petname] = positional(args.slice(2));
-  if (!uri) die("usage: cartero contact add <uri> [petname]");
+  const pos = positional(args.slice(2));
+  let target = pos[0], petname = pos[1];
+  if (!target) die("usage: cartero contact add <user@domain | uri> [petname]");
+  let uri, handle = null;
+  if (target.startsWith("postal://")) {
+    uri = target;
+  } else {                                              // a user@domain handle -> resolve via .well-known
+    const r = await resolveHandle(target);
+    uri = `${r.outbox}#${r.id}`;
+    handle = r.handle;
+    if (!petname) petname = parseHandle(target).user;
+  }
   const u = parseUri(uri);
-  const doc = await peerOutbox(uri).readIdentity(u.id) || die("could not resolve/verify an identity at that URI");
-  if (doc.id !== u.id) die("URI fingerprint does not match the published identity");
+  const doc = await peerOutbox(uri).readIdentity(u.id) || die("could not resolve/verify an identity at that outbox");
+  if (doc.id !== u.id) die("fingerprint does not match the published identity");
   const name = petname || ("anon-" + u.id.slice(0, 6));
-  await state.saveContact(name, { id: doc.id, uri, verified: true, verified_at: new Date().toISOString() });
-  console.log(`✓ saved contact "${name}"`);
+  await state.saveContact(name, { id: doc.id, uri, handle, verified: true, verified_at: new Date().toISOString() });
+  console.log(`✓ saved contact "${name}"` + (handle ? ` (${handle})` : ""));
   console.log("  VERIFY out-of-band that this fingerprint is really theirs:\n  " + doc.id);
 }
 

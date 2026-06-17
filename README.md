@@ -24,13 +24,22 @@ export GH_TOKEN=$(gh auth token)      # token con acceso al repo (escritura a TU
 export CARTERO_PASS=<tu-passphrase>   # cifra tu identidad en reposo (~/.cartero)
 
 cartero init <owner/repo> --name "Alice"     # crea identidad + outbox, imprime tu URI
-cartero contact add <uri-del-par> bob        # resuelve+verifica, guarda el petname "bob"
+cartero init <owner/repo> --handle alice@perera.dev   # + emite el binding firmado para tu dominio
+cartero contact add <uri | user@domain> bob  # resuelve+verifica (URI o handle), guarda "bob"
 cartero send bob "hola 👋" [--file ./doc.pdf] # envía un DM sellado (con adjunto opcional)
 cartero read bob [--save ./descargas]        # imprime la conversación (merge de ambos outboxes)
 cartero watch bob                            # poll cada 3s, imprime lo nuevo
 ```
 
 `CARTERO_HOME` separa estados locales (útil para probar varias identidades en una máquina).
+
+### Handles `user@domain` (F2)
+
+Una dirección legible y dable, estilo email, resuelta WebFinger: `cartero init --handle alice@perera.dev`
+emite un **binding firmado** que publicás en `https://perera.dev/.well-known/postal/alice.json`.
+Doble atestación: el **dominio** lo sirve (TLS = control del dominio) y la **clave** lo firma
+(consiente el binding `handle ↔ id ↔ outbox`). Debajo la identidad sigue siendo la clave, así que
+el handle es un **alias portable y desechable**. Otros te agregan con `cartero contact add alice@perera.dev`.
 
 ## Verificación
 
