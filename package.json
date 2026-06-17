@@ -2,8 +2,11 @@
   "name": "cartero",
   "version": "0.0.1",
   "type": "module",
-  "description": "Sovereign E2EE messenger over git, on the Postal protocol (MVP F1: 1:1 DM).",
+  "description": "Sovereign, end-to-end-encrypted messenger over git (DMs, groups, multi-device), on the Postal protocol.",
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "bin": {
     "cartero": "src/cli.js"
   },

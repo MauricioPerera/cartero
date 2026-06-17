@@ -1,122 +1,145 @@
 # Cartero
 
-**Mensajero E2EE soberano sobre git**, construido sobre el protocolo
-[postal](https://github.com/MauricioPerera/postal) (submódulo en `vendor/postal`).
-Tu identidad es una **clave**, tu buzón es un **repo git** que podés migrar, y cualquier
-cliente que hable el protocolo sirve. Sin servidor de mensajería, sin número de teléfono,
-sin proveedor que te pueda banear sin que te lleves todo.
+**A sovereign, end-to-end-encrypted messenger that runs on git.** Your identity is a key, your
+mailbox is a git repo you can migrate, and any client that speaks the protocol works. No
+messaging server to trust, no phone number, no provider that can deplatform you without you
+keeping everything.
 
-MVP (F1): **DM 1:1**, **texto + adjuntos** (imagen/documento), asíncrono (polling), cliente CLI.
-El contrato está en [`SPEC-F0.md`](SPEC-F0.md).
+Built on the [postal](https://github.com/MauricioPerera/postal) protocol (vendored as a git
+submodule). DMs and groups, text + file attachments, key-based identity, `user@domain` handles,
+an optional real-time relay, a CLI, and a web UI.
 
-## Cómo funciona (en una línea)
+> [!WARNING]
+> **Experimental — MVP, not security-audited.** The cryptographic core is signed (ECDSA P-256)
+> and sealed (ECDH P-256 + AES-256-GCM), but Cartero has **not** had an independent security
+> review. Treat it as a research project: fine to explore and self-host, **not** yet for
+> high-risk threat models. See [Security & limits](#security--limits).
 
-Cada quien escribe **solo su propio outbox** (un repo), sellando cada mensaje a su par; la
-conversación es el **merge de los dos outboxes**. Los adjuntos van cifrados y direccionados por
-hash **afuera** del evento (en `blobs/`); el evento firmado lleva solo el descriptor, sellado.
-El orden entre las dos partes es **causal** (`reply_to`), no total — no hay secuenciador único.
+## How it works (in one line)
 
-## Uso (CLI)
+Each person writes only to **their own outbox** (a repo), sealing every message to the
+recipient(s); a conversation is the **merge of the participants' outboxes**. Attachments are
+encrypted and content-addressed **outside** the event (in `blobs/`); the signed event carries only
+the (sealed) descriptor. Order between parties is **causal** (`reply_to`) — there is no global
+sequencer. The contract is specified in [`SPEC-F0.md`](SPEC-F0.md).
+
+## Getting started
+
+**Prerequisites:** Node.js **≥ 18**, git, and a GitHub account + token with access to a repo you
+own (your outbox). No `npm install` needed — there are no runtime dependencies beyond the
+submodule.
 
 ```bash
-# secretos por entorno
-export GH_TOKEN=$(gh auth token)      # token con acceso al repo (escritura a TU outbox)
-export CARTERO_PASS=<tu-passphrase>   # cifra tu identidad en reposo (~/.cartero)
+# 1. clone WITH the submodule (postal lives in vendor/postal)
+git clone --recursive <repo-url> cartero
+cd cartero
+#    (if you already cloned without --recursive:  git submodule update --init)
 
-cartero init <owner/repo> --name "Alice"     # crea identidad + outbox, imprime tu URI
-cartero init <owner/repo> --handle alice@perera.dev   # + emite el binding firmado para tu dominio
-cartero contact add <uri | user@domain> bob  # resuelve+verifica (URI o handle), guarda "bob"
-cartero send bob "hola 👋" [--file ./doc.pdf] # envía un DM sellado (con adjunto opcional)
-cartero read bob [--save ./descargas]        # imprime la conversación (merge de ambos outboxes)
-cartero watch bob                            # poll cada 3s + relay (instantáneo) por defecto
-cartero send bob "hola"                       # commitea a git Y reenvía por el relay (default)
-#   relay por defecto: https://cartero.ardf.dev · cambialo con --relay <url> o $CARTERO_RELAY · --no-relay lo desactiva
+# 2. run the tests (offline, no network)
+npm test
+
+# 3. run the CLI — either directly:
+node src/cli.js <command>
+#    or install the `cartero` command globally:
+npm link        # then just `cartero <command>`
 ```
 
-`CARTERO_HOME` separa estados locales (útil para probar varias identidades en una máquina).
+The examples below use the `cartero` command (after `npm link`); `node src/cli.js` works
+identically.
 
-## UI web
-
-Un cliente de navegador para DMs: `node web/server.mjs` → http://localhost:8765. El navegador
-hace **todo** (genera la identidad, firma/sella, habla con GitHub con tu token y con el relay);
-el server solo sirve archivos estáticos y no guarda secretos. Reusa los mismos módulos
-(`src/convo.js`, `src/outbox.js`, `src/attach.js`) que el CLI — son browser-compatibles. Setup
-con token + outbox + **passphrase**, agregás contactos por URI, enviás/recibís DMs (con adjuntos),
-y el relay da entrega instantánea. **Secretos cifrados en reposo:** la identidad (clave privada) y
-el token se guardan en un **vault** (PBKDF2 → AES-256-GCM con tu passphrase); en `localStorage` solo
-queda el ciphertext, y la passphrase se pide cada sesión (nunca se almacena). Usá un token de
-alcance mínimo igual.
-
-### Handles `user@domain` (F2)
-
-Una dirección legible y dable, estilo email, resuelta WebFinger: `cartero init --handle alice@perera.dev`
-emite un **binding firmado** que publicás en `https://perera.dev/.well-known/postal/alice.json`.
-Doble atestación: el **dominio** lo sirve (TLS = control del dominio) y la **clave** lo firma
-(consiente el binding `handle ↔ id ↔ outbox`). Debajo la identidad sigue siendo la clave, así que
-el handle es un **alias portable y desechable**. Otros te agregan con `cartero contact add alice@perera.dev`.
-
-### Relay para inmediatez (F2b, opcional)
-
-Sin relay la entrega es asíncrona (2–5 s por poll). Con un **relay** (`src/relay.js`, un
-reenviador **no-confiable**): `send --relay <url>` commitea a git **y** reenvía el evento al
-instante; `watch --relay <url>` se suscribe (SSE) y muestra lo nuevo en sub-segundo. El relay
-**nunca descifra** (ciphertext) y **no gana autoridad**: el receptor corre el gate en cada evento
-relayado, así un payload forjado se rechaza igual que uno leído de git. Git sigue siendo el
-registro durable. *(Disparar la entrega desde un push de git —webhook GitHub→relay— necesita el
-relay en una URL pública + HMAC del secreto: queda para hosting, no incluido.)*
-
-## Verificación
-
-- **Núcleo en memoria** (`test/cartero.test.mjs`, 26/0): roundtrip sellado (el par lee, un
-  tercero no), gate (firma/`chat_id`/self-dm/autor), adjuntos (hash-verificados), merge causal,
-  append-only, evento forjado descartado.
-- **End-to-end sobre git real** (`test/integration.test.mjs`, 8/8): dos outboxes reales, publicar
-  identidad, enviar texto + adjunto, leer el merge, descargar y descifrar el adjunto.
+## CLI
 
 ```bash
-npm test                                                # núcleo (sin red)
+# secrets via env
+export GH_TOKEN=$(gh auth token)      # a GitHub token with write access to YOUR outbox repo
+export CARTERO_PASS=<your-passphrase> # encrypts your identity at rest (~/.cartero)
+
+cartero init <owner/repo> --name "Alice"            # create identity + outbox, print your URI
+cartero contact add <uri | user@domain> bob         # resolve + verify a contact, save "bob"
+cartero send bob "hi 👋" [--file ./doc.pdf]          # send a sealed DM (optional attachment)
+cartero read bob [--save ./downloads]               # print the conversation (merge of both outboxes)
+cartero watch bob                                   # poll every 3s + instant relay delivery
+```
+
+`CARTERO_HOME` selects a separate local state dir (handy for running several identities on one
+machine). The relay defaults to `https://cartero.ardf.dev`; override with `--relay <url>` /
+`$CARTERO_RELAY`, or `--no-relay` to disable. **Heads-up:** with the default relay, your
+(sealed) events are forwarded through a third-party host — self-host the relay (see
+[`deploy/`](deploy/)) for full sovereignty.
+
+### Groups
+
+```bash
+cartero group create project bob carol   # create with your contacts; publishes a signed group doc
+cartero group join <creator-uri> <group-id>
+cartero group send project "hi all" [--file ...]
+cartero group read project               # merge of every member's outbox
+```
+
+### Domain handles (`user@domain`)
+
+A readable, give-out-able address resolved WebFinger-style. `cartero init --handle alice@you.dev`
+emits a **signed binding** to publish at `https://you.dev/.well-known/postal/alice.json`. Double
+attestation: the domain serves it (TLS = domain control) and the key signs it. The identity stays
+the key, so the handle is a portable, disposable alias. Others add you with
+`cartero contact add alice@you.dev`.
+
+### Multi-device
+
+One identity authorizes several **devices**, each with its OWN key (the master signs a cert per
+device). A device acts as the identity (`from` = the identity, signed by the device key); the gate
+accepts a signature from any authorized key. Messages are sealed to **all** of a recipient's keys.
+
+```bash
+cartero device add phone --out phone.json   # on the device holding the master key: certify + publish
+cartero device import phone.json            # on the new device (its own CARTERO_HOME): pair as you
+```
+
+## Web UI
+
+A browser DM client: `node web/server.mjs` → http://localhost:8765. The browser does everything
+(generates the identity, signs/seals, talks to GitHub with your token and to the relay); the
+server only serves static files and holds no secrets. **Secrets are encrypted at rest:** your
+identity (private key) and token live in a vault (PBKDF2 → AES-256-GCM with a passphrase you enter
+each session); localStorage only ever holds the ciphertext.
+
+## Tests
+
+```bash
+npm test                                                # core suites (no network)
 GH_TOKEN=$(gh auth token) GH_OWNER=<o> GH_REPO_A=<a> GH_REPO_B=<b> \
-  node test/integration.test.mjs                        # integración (red)
+  node test/integration.test.mjs                        # DM round-trip vs real repos
 ```
 
-### Grupos (F3 — núcleo)
+The offline suites (`cartero`, `handle`, `relay`, `group`, `device`, `multidevice`) cover the
+protocol: sealed round-trips, the gate (forgery / impersonation / inject-charged ids rejected),
+attachments (hash-verified), multi-outbox merge, and multi-device. Integration tests exercise the
+real GitHub transport.
 
-Un grupo es un **doc firmado por el creador** (`{ id, name, creator, members[], sig }`); los
-mensajes (`kind:"gm"`) van **sellados a todos los miembros** y cada uno postea a **su propio
-outbox** bajo el id del grupo (federado, sin escritura compartida); leer = el merge de los
-outboxes de los miembros. Probado (`test/group.test.mjs`, 15/0): doc firmado, sellado a N (todos
-leen, un tercero no), gate (no-miembro / grupo-equivocado), merge causal, miembro removido
-descartado. *Límites:* membresía gestionada por el creador (sin quórum), sin forward secrecy al
-remover.
+## Security & limits
 
-```bash
-cartero group create proyecto bob carol     # crea el grupo con tus contactos, publica el doc firmado
-cartero group join <creator-uri> <group-id> # un miembro se une (baja+verifica el doc del outbox del creador)
-cartero group send proyecto "hola" [--file] # mensaje sellado a todos los miembros
-cartero group read proyecto                 # merge de los outboxes de todos los miembros
-```
+Honest, by design:
 
-### Multi-dispositivo (F3)
+- **Not audited.** See the warning above. The canonical-JSON used for signing is not yet pinned to
+  a formal standard (JCS/RFC 8785), so cross-implementation interop isn't guaranteed yet.
+- **Metadata is not hidden.** Content is sealed (E2EE), but the signed envelope exposes
+  `from`/`to`, and a host with read access sees who talks to whom and when. Anonymous sealing hides
+  recipients *inside* the envelope, not the event fields. Hiding the social graph needs more
+  (per-conversation access control, mixnets) — out of scope.
+- **Order is causal, not total.** Between independent repos there is no trusted sequencer;
+  `created_at` is self-asserted and `reply_to` carries happened-before.
+- **Multi-device:** the master manages devices (no per-device revocation list yet); messages
+  sealed *before* a device is added are not readable by it (no retroactive access).
+- **Availability vs sovereignty:** your repo must be reachable when peers read. Any commodity git
+  host works (you can migrate freely because identity = your key), but a laptop behind NAT isn't a
+  24/7 inbox — that's inherent to async messaging, not a Cartero limitation.
 
-Una identidad (id = la clave maestra) autoriza varios **dispositivos**, cada uno con su PROPIA
-clave: el maestro firma un **cert** por dispositivo. Un dispositivo actúa COMO la identidad
-(`from` = id maestro, firmado por la clave del dispositivo); el gate acepta la firma si coincide
-con cualquier clave autorizada. Los mensajes se sellan a **todas** las claves del destinatario
-(maestro + dispositivos), así cualquiera de tus dispositivos lee. Sin tocar postal core.
+## Roadmap
 
-```bash
-cartero device add phone --out bob-phone.json   # en tu equipo con la clave maestra: certifica + publica
-cartero device import bob-phone.json             # en el equipo nuevo (CARTERO_HOME propio): queda como vos
-```
+`SPEC-F0` (contract) · F1 MVP (DMs, attachments, CLI) · F2 handles + relay (deployed) · F3 groups +
+multi-device + web UI — **done**. Next: F4 — federation discovery (a global `id → repo` registry)
+and a multi-repo aggregator; pinning the canonical form; an independent security review.
 
-Probado: `device.test` 12/0 (certs/derivación) · `multidevice.test` 10/0 (un dispositivo lee y
-**envía como su dueño**, gate acepta autorizados y rechaza suplantación) · smoke CLI contra repos
-reales (el teléfono lee lo sellado a él y envía firmando; alice lo acepta). *Límites:* el maestro
-gestiona los dispositivos (sin lista de revocación por dispositivo aún); mensajes sellados **antes**
-de agregar un dispositivo no son legibles por él (no hay acceso retroactivo).
+## License
 
-## Límites honestos (MVP)
-
-Metadatos no ocultos (el sobre expone `from`/`to`) · una clave por dispositivo · handles
-`@dominio` y relay/tiempo-real en fases siguientes · `created_at` auto-aseverado, orden **causal**
-entre partes. Ver `SPEC-F0.md §11`.
+[MIT](LICENSE).
