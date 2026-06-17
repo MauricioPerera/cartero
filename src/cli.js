@@ -25,6 +25,10 @@ const token = () => process.env.GH_TOKEN || die("set GH_TOKEN (a GitHub token wi
 const flag = (args, name) => { const i = args.indexOf("--" + name); return i >= 0 ? args[i + 1] : null; };
 const positional = (args) => args.filter((a, i) => !a.startsWith("--") && !(i > 0 && args[i - 1].startsWith("--")));
 
+// Default relay (the deployed public one). Override with --relay <url>, disable with --no-relay.
+const DEFAULT_RELAY = process.env.CARTERO_RELAY || "https://cartero.ardf.dev";
+const relayUrl = (args) => args.includes("--no-relay") ? null : (flag(args, "relay") || DEFAULT_RELAY);
+
 const myOutbox = (cfg) => outbox({ host: cfg.host, owner: cfg.owner, repo: cfg.repo, token: token() });
 const peerOutbox = (uri) => { const u = parseUri(uri); return outbox({ host: u.host, owner: u.owner, repo: u.repo, token: token() }); };
 
@@ -113,7 +117,7 @@ async function cmdSend(args) {
   const rnd = Math.random().toString(36).slice(2, 8);
   const ev = await buildDm(identity, peerId, { text, reply_to: null, attachments }, { created_at, rnd, seq: c.seq, prev: c.prev, directory });
   await out.appendEvent({ path: eventPath(chat, ev), event: ev }, blobFiles);
-  const relay = flag(args, "relay");                      // optional: instant fan-out (git stays the record)
+  const relay = relayUrl(args);                           // instant fan-out by default (git stays the record)
   if (relay) await relayPublish(relay, chat, ev);
   console.log("✓ sent" + (file ? " (+1 attachment)" : "") + (relay ? " (relayed)" : ""));
 }
@@ -161,7 +165,7 @@ async function cmdWatch(args) {
   await tick();
   setInterval(() => tick().catch((e) => console.error("✗ " + e.message)), 3000);   // poll = backfill + durable record
 
-  const relay = flag(args, "relay");
+  const relay = relayUrl(args);
   if (relay) {                                            // + instant delivery; gate every relayed event
     const { identity, directory, chat } = await context(petname);
     relaySubscribe(relay, chat, async (ev) => {

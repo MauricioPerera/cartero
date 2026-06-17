@@ -28,8 +28,9 @@ cartero init <owner/repo> --handle alice@perera.dev   # + emite el binding firma
 cartero contact add <uri | user@domain> bob  # resuelve+verifica (URI o handle), guarda "bob"
 cartero send bob "hola 👋" [--file ./doc.pdf] # envía un DM sellado (con adjunto opcional)
 cartero read bob [--save ./descargas]        # imprime la conversación (merge de ambos outboxes)
-cartero watch bob [--relay http://host:port] # poll cada 3s + (opcional) entrega instantánea
-cartero send bob "hola" --relay http://host:port   # commitea a git Y reenvía al instante
+cartero watch bob                            # poll cada 3s + relay (instantáneo) por defecto
+cartero send bob "hola"                       # commitea a git Y reenvía por el relay (default)
+#   relay por defecto: https://cartero.ardf.dev · cambialo con --relay <url> o $CARTERO_RELAY · --no-relay lo desactiva
 ```
 
 `CARTERO_HOME` separa estados locales (útil para probar varias identidades en una máquina).
