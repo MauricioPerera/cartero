@@ -1,46 +1,9 @@
-// Cartero F2b — the relay: an UNTRUSTED forwarder for near-real-time delivery. Senders POST the
-// SAME signed+sealed event they commit to git; the relay fans it out (SSE) to subscribers of that
-// chat instantly. The relay never decrypts (ciphertext) and never gains authority: the recipient
-// runs the gate (verifyDm) on every relayed event, so a malicious/forged relay payload is rejected
-// exactly like one read from git. Git stays the durable record; the relay is just the fast path.
+// Cartero F2b — relay CLIENT helpers (browser + node safe; only `fetch`). The relay SERVER lives
+// in src/relay-server.js (node-only) so importing these from the browser doesn't pull in node:http.
 //
-// HONEST SCOPE: this is the relay-DIRECT path (sender -> relay -> recipient), fully usable offline.
-// Triggering delivery from a git push (GitHub webhook -> relay) needs the relay on a PUBLIC URL +
-// the webhook secret/HMAC; that half is deferred (config/hosting), not built here.
-
-import { createServer } from "node:http";
-
-export function relayServer({ port = 0, host } = {}) {
-  const subs = new Map();                                  // chat_id -> Set(res)
-  const server = createServer((req, res) => {
-    const url = new URL(req.url, "http://x");
-    if (req.method === "GET" && url.pathname === "/sub") {
-      const chat = url.searchParams.get("chat") || "";
-      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache", Connection: "keep-alive" });
-      res.write(":ok\n\n");
-      if (!subs.has(chat)) subs.set(chat, new Set());
-      subs.get(chat).add(res);
-      req.on("close", () => subs.get(chat)?.delete(res));
-      return;
-    }
-    if (req.method === "POST" && url.pathname === "/pub") {
-      let b = ""; req.on("data", (c) => { b += c; if (b.length > 4e6) req.destroy(); });
-      req.on("end", () => {
-        try {
-          const { chat, event } = JSON.parse(b);           // opaque to the relay; not inspected/trusted
-          for (const r of subs.get(chat) || []) r.write(`data: ${JSON.stringify(event)}\n\n`);
-          res.writeHead(204); res.end();
-        } catch { res.writeHead(400); res.end(); }
-      });
-      return;
-    }
-    res.writeHead(404); res.end();
-  });
-  return new Promise((resolve) => server.listen(port, host, () => {
-    const p = server.address().port;
-    resolve({ port: p, url: `http://localhost:${p}`, close: () => new Promise((r) => server.close(r)) });
-  }));
-}
+// The relay is an UNTRUSTED forwarder: a sender publishes the SAME signed+sealed event it commits
+// to git; subscribers receive it instantly but MUST gate every delivery (the relay gains no
+// authority — a forged payload is rejected exactly like one read from git).
 
 // Publisher: push an event to the relay (best-effort; failure never blocks the git write).
 export async function publish(relayUrl, chat, event) {

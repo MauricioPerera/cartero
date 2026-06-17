@@ -1,0 +1,192 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Cartero</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root { --bg:#0b0d12; --panel:#12151c; --line:#222834; --ink:#e6eaf0; --mut:#8b94a3; --acc:#7cc4ff; --mine:#1c3a5e; --theirs:#1a1f29; }
+  * { box-sizing:border-box } body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif }
+  a { color:var(--acc) } button { cursor:pointer; font:inherit }
+  .wrap { display:grid; grid-template-columns:260px 1fr; height:100vh }
+  header { grid-column:1/3; display:flex; gap:12px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line) }
+  header b { color:var(--acc) } header .uri { color:var(--mut); font:12px ui-monospace,Menlo,Consolas,monospace; cursor:pointer }
+  aside { border-right:1px solid var(--line); padding:10px; overflow:auto }
+  aside h2 { font-size:11px; letter-spacing:.08em; color:var(--mut); margin:8px 4px }
+  .contact { padding:8px 10px; border-radius:8px; cursor:pointer } .contact:hover { background:var(--panel) } .contact.sel { background:var(--mine) }
+  .contact .id { color:var(--mut); font:11px ui-monospace,monospace }
+  main { display:flex; flex-direction:column; min-height:0 }
+  .msgs { flex:1; overflow:auto; padding:16px; display:flex; flex-direction:column; gap:8px }
+  .m { max-width:70%; padding:8px 12px; border-radius:12px; background:var(--theirs) } .m.mine { align-self:flex-end; background:var(--mine) }
+  .m .meta { font-size:11px; color:var(--mut); margin-bottom:2px }
+  .compose { display:flex; gap:8px; padding:12px 16px; border-top:1px solid var(--line) }
+  .compose input[type=text] { flex:1; background:var(--panel); border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:10px 12px; font:inherit }
+  .compose button, .btn { background:var(--acc); color:#0a1020; border:0; border-radius:8px; padding:0 14px; font-weight:600 }
+  .setup { max-width:440px; margin:8vh auto; background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:24px }
+  .setup h1 { margin:0 0 4px } .setup p { color:var(--mut); margin:0 0 16px }
+  .setup label { display:block; font-size:12px; color:var(--mut); margin:10px 0 4px }
+  .setup input { width:100%; background:#0c0e13; border:1px solid var(--line); color:var(--ink); border-radius:8px; padding:9px 11px; font:inherit }
+  .setup button { margin-top:16px; width:100%; padding:11px }
+  .empty { color:var(--mut); margin:auto } .warn { color:#f6b26b; font-size:12px }
+  .att { display:inline-block; margin-top:4px; font-size:13px }
+</style>
+
+<div id="setup" class="setup" hidden>
+  <h1>Cartero</h1>
+  <p>Mensajero E2EE soberano sobre git. Tu identidad es una clave; tu buzón, un repo.</p>
+  <label>GitHub token (acceso a tu repo-buzón)</label><input id="s-token" type="password" autocomplete="off">
+  <label>Tu outbox — owner/repo</label><input id="s-repo" placeholder="usuario/cartero-outbox">
+  <label>Nombre para mostrar</label><input id="s-name" placeholder="Alice">
+  <button class="btn" id="s-go">Crear identidad y publicar</button>
+  <p class="warn" style="margin-top:14px">La clave privada y el token se guardan en este navegador (localStorage). Es un MVP — usá un token de alcance mínimo.</p>
+</div>
+
+<div id="app" class="wrap" hidden>
+  <header>
+    <span>Cartero · <b id="me-name"></b></span>
+    <span class="uri" id="me-uri" title="copiar tu URI"></span>
+    <span style="margin-left:auto"><button class="btn" id="add">+ contacto</button></span>
+  </header>
+  <aside><h2>CONTACTOS</h2><div id="contacts"></div></aside>
+  <main>
+    <div class="msgs" id="msgs"><div class="empty">elegí un contacto</div></div>
+    <div class="compose" id="compose" hidden>
+      <input id="box" type="text" placeholder="Escribí un mensaje…" autocomplete="off">
+      <input id="file" type="file" hidden>
+      <button id="attach" title="adjuntar">📎</button>
+      <button id="send">Enviar</button>
+    </div>
+  </main>
+</div>
+
+<script type="module">
+import { createIdentity, publicIdentityDoc, eventHash } from "/vendor/postal/src/postal.js";
+import { outbox, eventPath } from "/src/outbox.js";
+import { buildDm, deriveChatId, resolveConversation, verifyDm, openDm } from "/src/convo.js";
+import { encryptFile, decryptFile, makeDescriptor } from "/src/attach.js";
+import { parseUri } from "/src/uri.js";
+import { publish as relayPublish, subscribe as relaySubscribe } from "/src/relay.js";
+
+const RELAY = "https://cartero.ardf.dev";
+const $ = (id) => document.getElementById(id);
+const esc = (v) => String(v==null?"":v).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const LS = { get: (k,d) => { try { return JSON.parse(localStorage.getItem("cartero."+k)) ?? d; } catch { return d; } }, set: (k,v) => localStorage.setItem("cartero."+k, JSON.stringify(v)) };
+
+let me = LS.get("identity"), cfg = LS.get("config"), contacts = LS.get("contacts", {});
+let current = null, currentSub = null, seen = new Set();
+
+const myOut = () => outbox({ host: cfg.host, owner: cfg.owner, repo: cfg.repo, token: cfg.token });
+const peerOut = (uri) => { const u = parseUri(uri); return outbox({ host: u.host, owner: u.owner, repo: u.repo, token: cfg.token }); };
+const directoryFor = async (contact) => ({ [me.id]: await publicIdentityDoc(me), [contact.id]: await peerOut(contact.uri).readIdentity(contact.id) });
+async function chainOf(out, chat) { const mine = (await out.readChat(chat)).filter(it => it.event.from === me.id).sort((a,b)=>a.event.seq-b.event.seq); return { seq: mine.length, prev: mine.length ? await eventHash(mine.at(-1).event) : null }; }
+
+// --- setup ---
+async function doSetup() {
+  const token = $("s-token").value.trim(), slug = $("s-repo").value.trim(), name = $("s-name").value.trim();
+  if (!token || !slug.includes("/")) return alert("token y owner/repo son obligatorios");
+  $("s-go").disabled = true; $("s-go").textContent = "creando…";
+  try {
+    const [owner, repo] = slug.split("/");
+    cfg = { host: "github.com", owner, repo, token };
+    me = await createIdentity(name);
+    await myOut().publishIdentity(await publicIdentityDoc(me));
+    LS.set("identity", me); LS.set("config", cfg);
+    boot();
+  } catch (e) { alert("error: " + e.message); $("s-go").disabled = false; $("s-go").textContent = "Crear identidad y publicar"; }
+}
+
+// --- contacts ---
+function renderContacts() {
+  $("contacts").innerHTML = Object.entries(contacts).map(([n,c]) =>
+    `<div class="contact ${current===n?'sel':''}" data-n="${esc(n)}">${esc(n)}<div class="id">${esc(c.id)}</div></div>`).join("") || '<div class="empty" style="font-size:12px">sin contactos</div>';
+  for (const el of document.querySelectorAll(".contact")) el.onclick = () => selectContact(el.dataset.n);
+}
+async function addContact() {
+  const uri = prompt("Pegá la URI del contacto (postal://host/owner/repo#huella):"); if (!uri) return;
+  try {
+    const u = parseUri(uri.trim());
+    const doc = await peerOut(uri.trim()).readIdentity(u.id);
+    if (!doc || doc.id !== u.id) return alert("no se pudo resolver/verificar esa identidad");
+    const name = prompt("Nombre local (petname):", doc.display_name || u.id.slice(0,6)) || u.id.slice(0,6);
+    contacts[name] = { id: doc.id, uri: uri.trim() }; LS.set("contacts", contacts); renderContacts();
+    alert("Verificá fuera de banda que esta huella es suya:\n" + doc.id);
+  } catch (e) { alert("error: " + e.message); }
+}
+
+// --- conversation ---
+async function selectContact(name) {
+  current = name; renderContacts(); $("compose").hidden = false; seen = new Set();
+  if (currentSub) { currentSub.abort(); currentSub = null; }
+  await refresh();
+  const c = contacts[name], chat = await deriveChatId(me.id, c.id);
+  const ac = new AbortController(); currentSub = ac;
+  relaySubscribe(RELAY, chat, async (ev) => {   // live: gate every relayed event
+    const dir = await directoryFor(c);
+    if (!(await verifyDm(ev, { directory: dir })).ok || seen.has(ev.id)) return;
+    await refresh();
+  }, { signal: ac.signal }).catch(()=>{});
+}
+async function refresh() {
+  if (!current) return;
+  const c = contacts[current], chat = await deriveChatId(me.id, c.id);
+  const dir = await directoryFor(c);
+  const items = [...await myOut().readChat(chat), ...await peerOut(c.uri).readChat(chat)];
+  const convo = await resolveConversation(items, me, { directory: dir });
+  for (const m of convo) seen.add(m.id);
+  $("msgs").innerHTML = convo.map(renderMsg).join("") || '<div class="empty">sin mensajes</div>';
+  $("msgs").scrollTop = $("msgs").scrollHeight;
+  bindAttachments(c);
+}
+function renderMsg(m) {
+  const who = m.mine ? "vos" : esc(current);
+  const atts = m.attachments.map((a,i) => `<a class="att" href="#" data-att="${m.id}:${i}">📎 ${esc(a.name)}</a>`).join("");
+  return `<div class="m ${m.mine?'mine':''}"><div class="meta">${who} · ${esc(m.at.slice(11,16))}</div>${esc(m.text||"")}${atts}</div>`;
+}
+function bindAttachments(c) {
+  for (const el of document.querySelectorAll("[data-att]")) el.onclick = async (e) => {
+    e.preventDefault(); el.textContent = "⏳ " + el.textContent;
+    try {
+      const chat = await deriveChatId(me.id, c.id);
+      const items = [...await myOut().readChat(chat), ...await peerOut(c.uri).readChat(chat)];
+      const convo = await resolveConversation(items, me, { directory: await directoryFor(c) });
+      const [mid, idx] = el.dataset.att.split(":"); const m = convo.find(x => x.id === mid); const a = m.attachments[+idx];
+      const fromMine = m.mine; const store = fromMine ? myOut() : peerOut(c.uri);
+      const ct = await store.getBlob(a.locator);
+      const bytes = await decryptFile(ct, a.key, a.hash);
+      const url = URL.createObjectURL(new Blob([bytes])); const dl = document.createElement("a"); dl.href = url; dl.download = a.name; dl.click(); URL.revokeObjectURL(url);
+      el.textContent = el.textContent.replace("⏳ ", "");
+    } catch (err) { alert("no se pudo bajar: " + err.message); }
+  };
+}
+async function send() {
+  const text = $("box").value.trim(); const file = $("file").files[0];
+  if (!current || (!text && !file)) return;
+  $("box").value = ""; $("send").disabled = true;
+  try {
+    const c = contacts[current], chat = await deriveChatId(me.id, c.id), out = myOut(), dir = await directoryFor(c);
+    const attachments = [], blobFiles = [];
+    if (file) { const enc = await encryptFile(new Uint8Array(await file.arrayBuffer())); attachments.push(makeDescriptor({ name: file.name, mime: file.type||"application/octet-stream", size: file.size, hash: enc.hash, key: enc.key })); blobFiles.push(out.blobFile(enc.hash, enc.ct)); $("file").value = ""; }
+    const ch = await chainOf(out, chat);
+    const ev = await buildDm(me, c.id, { text, reply_to: null, attachments }, { created_at: new Date().toISOString(), rnd: Math.random().toString(36).slice(2,8), seq: ch.seq, prev: ch.prev, directory: dir });
+    await out.appendEvent({ path: eventPath(chat, ev), event: ev }, blobFiles);
+    relayPublish(RELAY, chat, ev).catch(()=>{});
+    await refresh();
+    setTimeout(() => refresh().catch(()=>{}), 2000);   // GitHub read-after-write is eventually consistent
+    setTimeout(() => refresh().catch(()=>{}), 5000);
+  } catch (e) { alert("error al enviar: " + e.message); }
+  $("send").disabled = false;
+}
+
+// --- boot ---
+function boot() {
+  if (!me || !cfg) { $("setup").hidden = false; $("app").hidden = true; $("s-go").onclick = doSetup; return; }
+  $("setup").hidden = true; $("app").hidden = false;
+  $("me-name").textContent = me.display_name || me.id.slice(0,8);
+  const uri = `postal://${cfg.host}/${cfg.owner}/${cfg.repo}#${me.id}`;
+  $("me-uri").textContent = uri; $("me-uri").onclick = () => { navigator.clipboard?.writeText(uri); $("me-uri").textContent = "¡copiada!"; setTimeout(()=>$("me-uri").textContent=uri, 1000); };
+  $("add").onclick = addContact; $("send").onclick = send;
+  $("box").addEventListener("keydown", e => { if (e.key === "Enter") send(); });
+  $("attach").onclick = () => $("file").click();
+  $("file").onchange = () => { if ($("file").files[0]) send(); };
+  renderContacts();
+}
+boot();
+</script>

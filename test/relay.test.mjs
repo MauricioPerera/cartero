@@ -2,7 +2,8 @@
 // Proves the relay is UNTRUSTED: it forwards anything, but the recipient's gate drops forgeries.
 // Run: node test/relay.test.mjs
 import { createIdentity, publicIdentityDoc } from "../vendor/postal/src/postal.js";
-import { relayServer, publish, subscribe } from "../src/relay.js";
+import { relayServer } from "../src/relay-server.js";
+import { publish, subscribe } from "../src/relay.js";
 import { buildDm, deriveChatId, verifyDm, openDm } from "../src/convo.js";
 
 let pass = 0, fail = 0;

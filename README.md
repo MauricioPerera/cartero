@@ -35,6 +35,16 @@ cartero send bob "hola"                       # commitea a git Y reenvía por el
 
 `CARTERO_HOME` separa estados locales (útil para probar varias identidades en una máquina).
 
+## UI web
+
+Un cliente de navegador para DMs: `node web/server.mjs` → http://localhost:8765. El navegador
+hace **todo** (genera la identidad, firma/sella, habla con GitHub con tu token y con el relay);
+el server solo sirve archivos estáticos y no guarda secretos. Reusa los mismos módulos
+(`src/convo.js`, `src/outbox.js`, `src/attach.js`) que el CLI — son browser-compatibles. Setup
+con token + outbox, agregás contactos por URI, enviás/recibís DMs (con adjuntos), y el relay da
+entrega instantánea. *MVP:* la clave privada y el token viven en `localStorage` (riesgo de XSS;
+usá un token de alcance mínimo).
+
 ### Handles `user@domain` (F2)
 
 Una dirección legible y dable, estilo email, resuelta WebFinger: `cartero init --handle alice@perera.dev`
