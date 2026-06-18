@@ -115,6 +115,14 @@ cartero device add phone --out phone.json   # on the device holding the master k
 cartero device import phone.json            # on the new device (its own CARTERO_HOME): pair as you
 ```
 
+### Bots / agents
+
+A bot is **just another identity** (a key + an outbox), so the protocol carries
+person-to-bot conversations with no special support — no platform approval, no API keys,
+and the bot's identity is cryptographically verifiable. Build one by importing `createBot`
+from [`src/bot.js`](src/bot.js); see the minimal [`examples/echo-bot.mjs`](examples/echo-bot.mjs)
+and the design notes in [`docs/DESIGN-bots.md`](docs/DESIGN-bots.md).
+
 ## Web UI
 
 A browser DM client: `node web/server.mjs` → http://localhost:8765. The browser does everything
