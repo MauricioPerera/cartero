@@ -176,8 +176,9 @@ function bindAttachments(c) {
       const items = [...await myOut().readChat(chat), ...await peerOut(c.uri).readChat(chat)];
       const convo = await resolveConversation(items, me, { directory: await directoryFor(c) });
       const [mid, idx] = el.dataset.att.split(":"); const m = convo.find(x => x.id === mid); const a = m.attachments[+idx];
+      if (a.size && a.size > DEFAULT_MAX_ATTACH) throw new Error(`declarado ${(a.size/1048576).toFixed(1)} MB > ${(DEFAULT_MAX_ATTACH/1048576).toFixed(0)} MB`);
       const fromMine = m.mine; const store = fromMine ? myOut() : peerOut(c.uri);
-      const ct = await store.getBlob(a.locator);
+      const ct = await store.getBlob(a.locator, DEFAULT_MAX_ATTACH);
       const bytes = await decryptFile(ct, a.key, a.hash);
       const url = URL.createObjectURL(new Blob([bytes])); const dl = document.createElement("a"); dl.href = url; dl.download = a.name; dl.click(); URL.revokeObjectURL(url);
       el.textContent = el.textContent.replace("⏳ ", "");

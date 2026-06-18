@@ -156,9 +156,12 @@ async function cmdRead(args) {
   const saveDir = flag(args, "save");
   if (saveDir) {
     await mkdir(saveDir, { recursive: true });
+    const max = maxAttach(args);
+    const cfg = await state.loadConfig();
     for (const m of convo) for (const a of m.attachments) {
       try {
-        const ct = await theirs.getBlob(a.locator) || (await myOutbox(await state.loadConfig()).getBlob(a.locator));
+        if (a.size && a.size > max) { console.error(`  ✗ ${a.name}: declared ${(a.size / 1048576).toFixed(1)} MB > ${(max / 1048576).toFixed(0)} MB cap (skipped; raise with --max-mb)`); continue; }
+        const ct = await theirs.getBlob(a.locator, max) || (await myOutbox(cfg).getBlob(a.locator, max));
         if (ct) { await writeFile(join(saveDir, a.name), await decryptFile(ct, a.key, a.hash)); console.log("  saved " + a.name); }
       } catch (e) { console.error("  ✗ " + a.name + ": " + e.message); }
     }

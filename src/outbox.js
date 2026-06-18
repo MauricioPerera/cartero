@@ -27,7 +27,25 @@ export function outbox({ host = "github.com", owner, repo, token, branch = "main
 
     // Blob file for an encrypted attachment (base64 text). Returns a { path, content } to commit.
     blobFile(hash, ct) { return { path: `blobs/${hash}`, content: bytesToBase64(ct) }; },
-    async getBlob(locator) { const f = await client.getFile(locator); return f ? base64ToBytes(f.content) : null; },
+    // Fetch an encrypted blob. Uses GitHub's RAW media type (streams up to 100MB); the plain
+    // Contents API silently truncates files over 1MB, which would break any attachment whose stored
+    // base64 exceeds that. `maxBytes` bounds what a PEER can make you download/decrypt — the
+    // descriptor's `size` is self-asserted, so we cap the ACTUAL bytes before returning them.
+    async getBlob(locator, maxBytes) {
+      let bytes;
+      if (token && owner && repo) {
+        const path = String(locator).split("/").map(encodeURIComponent).join("/");
+        const res = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(branch)}`,
+          { headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github.raw", "X-GitHub-Api-Version": "2022-11-28" } });
+        if (res.status === 404) return null;
+        if (!res.ok) throw new Error(`getBlob ${locator}: HTTP ${res.status}`);
+        bytes = base64ToBytes(String(await res.text()).trim());     // we stored base64 TEXT; raw returns it
+      } else {
+        const f = await client.getFile(locator); if (!f) return null; bytes = base64ToBytes(f.content);
+      }
+      if (maxBytes && bytes.length > maxBytes + 65536) throw new Error(`attachment too large to download: ${(bytes.length / 1048576).toFixed(1)} MB > ${(maxBytes / 1048576).toFixed(0)} MB cap`);
+      return bytes;
+    },
 
     // Commit a DM event plus any attachment blobs in ONE commit. `item` = { path, event }.
     async appendEvent(item, blobFiles = []) {

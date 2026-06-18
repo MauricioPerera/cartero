@@ -118,7 +118,11 @@ El binario **no** va en el evento. Va cifrado y direccionado por contenido; el e
 
 `K` viaja **dentro del cuerpo sellado** (ya E2EE). El blob es **ciphertext** verificado por `hash`, así que el store es **no-confiable**.
 
-**Al recibir:** desellar cuerpo → leer descriptor → traer `locator` del outbox del emisor → verificar `SHA-256(ct) == hash` (integridad) → descifrar con `K`. Límite **enforced**: 8 MB por defecto (configurable con `--max-mb` / `$CARTERO_MAX_ATTACH_MB`); los blobs van directo al host git, así que un archivo sin tope inflaría el repo.
+**Al recibir:** desellar cuerpo → leer descriptor → traer `locator` del outbox del emisor (vía el **raw media type** de GitHub, que sirve hasta 100 MB; la Contents API trunca >1 MB y rompería el adjunto) → verificar `SHA-256(ct) == hash` (integridad) → descifrar con `K`.
+
+**Tope de tamaño — enforced en AMBOS lados** (8 MB por defecto, configurable con `--max-mb` / `$CARTERO_MAX_ATTACH_MB`):
+- **Envío:** el emisor se niega a adjuntar un archivo sobre el tope (los blobs van directo a su repo git; uno sin tope lo inflaría).
+- **Recepción:** el receptor rechaza descargar/descifrar un blob sobre el tope. El `size` del descriptor lo **afirma el emisor**, así que el límite se acota sobre los **bytes reales** traídos, no sobre el `size` declarado.
 
 ## 7. Canonicalización (NORMATIVA, fijada en F0)
 
