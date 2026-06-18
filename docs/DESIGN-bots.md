@@ -236,11 +236,13 @@ se tiene. La lógica del handler debe tolerar reprocesar.
 
 ---
 
-## 9. Próximo paso para pasar de pensar a hacer
+## 9. Estado: echo-bot construido y validado
 
-Un **echo-bot mínimo** (un `onMessage` que responde) corriendo sobre la CLI actual + un
-cursor persistente, para validar el ciclo de las 6 etapas end-to-end contra GitHub real.
-Eso prueba el loop completo antes de invertir en la API de handlers o en el Arquetipo 2.
+El **echo-bot mínimo** ya existe ([`src/bot.js`](../src/bot.js) + [`examples/echo-bot.mjs`](../examples/echo-bot.mjs)),
+con cursor persistente. Probado offline ([`test/bot.test.mjs`](../test/bot.test.mjs), 10 checks,
+en el gate) y end-to-end contra GitHub real (round-trip, ruteo `/ping`, idempotencia,
+persistencia del cursor). El Arquetipo 1 está cerrado a nivel MVP; el Arquetipo 2 se detalla
+en §11.
 
 ---
 
@@ -254,3 +256,78 @@ Eso prueba el loop completo antes de invertir en la API de handlers o en el Arqu
 - **Bots públicos:** requieren el patrón relay+registry para descubrir remitentes
   desconocidos (Gap 2).
 - **No prometer** exactly-once, permisos granulares, ni acceso retroactivo: no existen.
+
+---
+
+## 11. Arquetipo 2 — diseño detallado (validado contra el árbol)
+
+Un bot que **gestiona tu propia bandeja** (lee lo que otros te mandaron, clasifica, resume,
+responde por vos) debe poder descifrar lo sellado *a vos* → es, necesariamente, un
+**dispositivo tuyo** (multi-device, [`src/device.js`](../src/device.js)).
+
+### Insight de base: leer y escribir YA están separados criptográficamente
+- **Leer** = tener una enc key a la que el remitente selló → lo controla `recipientEncKeys`.
+- **Firmar/responder como vos** = tener una sign key autorizada → lo controla `authorizedSignKeys`.
+
+El cert de hoy ([device.js:20](../src/device.js)) emite **ambas** y `authorizedSignKeys` admite
+la sign de todo cert válido. Es decir: **hoy todo device es read-WRITE**; no hay read-only. La
+separación cripto existe, solo falta exponerla.
+
+### Validación empírica (sonda descartable, no feature — 9/0 contra el código real)
+| Afirmación | Resultado |
+|---|---|
+| Hoy todo device es read-write (su sign key se autoriza siempre; el gate acepta su firma como vos) | ✅ confirmado |
+| Un device lee tu bandeja entrante (sellado a tu set incl. el bot) | ✅ |
+| Sin acceso retroactivo: un msg sellado antes de existir el bot NO lo abre; vos (master) sí | ✅ |
+| Camino B (re-sellado) es factible con `openAnonymous`+`sealAnonymous`; un tercero no lo abre | ✅ |
+
+Lo que la sonda **no** probó porque **no existe en el código**: el campo `caps` (read-only) y la
+revocación firmada. La sonda justamente expone el hueco (la sign se autoriza sin condición).
+
+### Permisos por dispositivo
+**Read-only es casi gratis**: certificar la **enc** key (lee) sin autorizar la **sign** key
+(no responde como vos). Falta un campo de capacidad en el cert:
+```
+cert = { v, identity, name, device_sign, device_enc, caps:["read"], created_at, sig }
+```
+- `authorizedSignKeys`: agrega `device_sign` **solo si** `caps` incluye `"write"`.
+- `recipientEncKeys`: agrega `device_enc` si incluye `"read"`.
+- Default `["read","write"]` si `caps` ausente → retrocompatible. Toca `device.js`, no postal-core.
+
+**Scope por conversación (leer solo el chat X): NO factible** por sellado público — el remitente
+sella a *todo* tu set sin saber de tus chats. Limitar lectura por chat obliga a sacar la bot-key
+del set público y re-sellarle selectivamente → converge con el histórico (Camino B).
+
+### Acceso a histórico — tres caminos
+| Camino | Da | Costo / confianza |
+|---|---|---|
+| **A. Bot en tu enc set** (multi-device de hoy + cap `read`) | Lee todo **desde su alta** | Sin histórico, sin scope, revocar-lectura imposible |
+| **B. Re-sellado por el master** | Histórico **+ scope + revocación de lectura** | El master debe correr un proceso; duplica ciphertext |
+| **C. Darle tu master enc key** | Todo, histórico y futuro | Cero granularidad: el bot **es vos** |
+
+**Camino B** destraba todo a la vez: la bot-key NO está en tu set público (no recibe sellado
+indiscriminado); vos (master) abrís los mensajes elegidos y los **re-sellás** a la bot-key en un
+buzón que el bot lee. "Qué re-sellás" = scope; "dejás de re-sellar" = revocación de lectura
+inmediata. Costo: el master debe estar corriendo el re-sellado + storage duplicado, y el
+`tickContact` del bot leería el **buzón re-sellado** en vez de los outboxes de los peers.
+
+### Revocación por dispositivo
+- **Firma:** hoy = quitar el cert del set publicado (insuficiente: re-publicar el cert lo
+  revive). Falta una **revocación firmada** por el master con `revoked_at`; el gate rechaza
+  eventos de esa key **posteriores** a ese instante (los viejos siguen válidos — son historial).
+  Toca el gate (`verifyDm`/`signingKeyOf`).
+- **Lectura:** **no es retroactiva** — lo ya sellado a una key es legible para siempre por quien
+  la tenga. Lo único honesto: dejar de sellarle. Con Camino B es inmediato; con Camino A, lo
+  sellado durante su vigencia queda legible aunque quites el cert.
+
+### Recomendación
+- **Asistente que clasifica/resume desde que lo activás** → **Camino A + cap `read`**. Cambio
+  chico, sin histórico, suficiente para la mayoría. Construir primero.
+- **Asistente con scope estricto / histórico / revocación de lectura real** → **Camino B**
+  (cripto ya validada; falta proceso master + buzón + ajuste de `tickContact`).
+- **Camino C** solo si confiás en el bot como en vos mismo y no te importa histórico ni revocar.
+
+### Qué tocaría (todo cartero, nada postal-core)
+`device.js` (`caps` + condicionar sign/enc + lista de revocación firmada) · gate
+(`verifyDm`/`signingKeyOf`: chequear `revoked_at`) · (Camino B) módulo de re-sellado del master
++ `bot.js` `tickContact` leyendo el buzón re-sellado.
