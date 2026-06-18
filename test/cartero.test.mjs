@@ -92,6 +92,10 @@ console.log("# a forged event in the stream never reaches the conversation");
 const forged = { ...ev, sig: ev.sig.slice(0, -2) + "zz" };
 const withForged = await resolveConversation([item(ev), item(forged)], bob, { directory });
 ok("forged duplicate is dropped, only the real one stays", withForged.length === 1);
+// Regression: a forgery copying a real event's id (=> same path) must NOT suppress the real one
+// even when it is processed FIRST (it must not reserve the path in seenPaths).
+const forgedFirst = await resolveConversation([item(forged), item(ev)], bob, { directory });
+ok("real survives even when the forgery (same id) is processed first", forgedFirst.length === 1 && forgedFirst[0].text === "hola bob 👋");
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);

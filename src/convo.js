@@ -85,8 +85,9 @@ export async function resolveConversation(items, me, { directory } = {}) {
   for (const it of items) {
     const ev = it.event;
     const v = await verifyDm(ev, { directory, seenPaths });
-    seenPaths.add(eventPath(ev.chat_id, ev));
     if (!v.ok) continue;
+    seenPaths.add(eventPath(ev.chat_id, ev));   // only a VALID event reserves its path: an invalid
+    // event (e.g. a forgery copying a real id) must not poison the path and suppress the real one.
     let content = null;
     try { content = await openDm(ev, me); } catch {}
     kept.push({ event: ev, content });

@@ -45,6 +45,11 @@ const convo = await resolveGroup(merged, carol, { groupDoc: group, directory });
 ok("all three messages resolve, in time order", convo.length === 3 && convo.map((m) => m.at).join() === [T(1), T(2), T(3)].join());
 ok("attribution correct (alice, bob, carol)", convo[0].from === alice.id && convo[1].from === bob.id && convo[2].from === carol.id && convo[2].mine);
 
+console.log("# a forged gm copying a real id must not suppress the real one (seenPaths)");
+const forgedBob = { ...bobMsg, sig: bobMsg.sig.slice(0, -2) + (bobMsg.sig.endsWith("zz") ? "aa" : "zz") };
+const sup = await resolveGroup([item(forgedBob), item(bobMsg)], carol, { groupDoc: group, directory });
+ok("real gm survives even when the forgery (same id) is processed first", sup.filter((m) => m.text === "arranco yo").length === 1);
+
 console.log("# removed member: a message from someone not in the doc is dropped");
 const smallGroup = await buildGroupDoc(alice, { name: "proyecto", members: [bob.id], created_at: T(0), rnd: "g2" });  // carol removed
 // carol tries to post to the original group id but the reader uses smallGroup (carol not a member)
