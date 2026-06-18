@@ -126,7 +126,7 @@ El binario **no** va en el evento. Va cifrado y direccionado por contenido; el e
 
 ## 7. Canonicalización (NORMATIVA, fijada en F0)
 
-Para firmar y para `hash` de payloads se usa la forma canónica de la implementación de referencia de postal (`crypto.canonical`): **claves ordenadas lexicográficamente, recursiva, `JSON.stringify` para primitivas, sin espacios**. Dos clientes interoperan **solo** si canonicalizan idéntico. F0 **congela esta forma como el contrato**; alinearla formalmente a **JCS / RFC 8785** + vectores cross-lenguaje es roadmap (no bloquea el MVP de un solo cliente).
+Para firmar y para `hash` de payloads se usa `crypto.canonical` de postal, que **es JCS / RFC 8785**: claves ordenadas por **unidades de código UTF-16**, `JSON.stringify` de ECMAScript para primitivas (= la serialización de strings/números del RFC), recursiva, sin espacios. **Pineada y probada** contra vectores autoritativos en `vendor/postal/test/canonical.test.mjs` (números de RFC §3.2.3, escaping de strings, gotcha de ordenamiento UTF-16). Dos clientes interoperan si ambos son conformes JCS. **Único pendiente de roadmap:** correr la suite de vectores **cross-lenguaje** de referencia — hoy hay una sola implementación (JS), así que la interop entre lenguajes se sigue de la conformancia con el estándar, no de una segunda implementación probada.
 
 ## 8. El gate de Cartero (sobre `verifyEvent`)
 
