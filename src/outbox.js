@@ -39,6 +39,10 @@ export function outbox({ host = "github.com", owner, repo, token, branch = "main
           { headers: { Authorization: "Bearer " + token, Accept: "application/vnd.github.raw", "X-GitHub-Api-Version": "2022-11-28" } });
         if (res.status === 404) return null;
         if (!res.ok) throw new Error(`getBlob ${locator}: HTTP ${res.status}`);
+        // Reject BEFORE buffering the body when the size is known: the stored blob is base64 text,
+        // so its byte length is ~4/3 of the ct. (Backstop below caps real bytes if the header lies.)
+        const clen = Number(res.headers.get("content-length") || 0);
+        if (maxBytes && clen > Math.ceil((maxBytes + 65536) * 4 / 3)) throw new Error(`attachment too large to download: ${(clen * 3 / 4 / 1048576).toFixed(1)} MB > ${(maxBytes / 1048576).toFixed(0)} MB cap`);
         bytes = base64ToBytes(String(await res.text()).trim());     // we stored base64 TEXT; raw returns it
       } else {
         const f = await client.getFile(locator); if (!f) return null; bytes = base64ToBytes(f.content);

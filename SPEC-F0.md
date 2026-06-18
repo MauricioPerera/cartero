@@ -122,7 +122,7 @@ El binario **no** va en el evento. Va cifrado y direccionado por contenido; el e
 
 **Tope de tamaño — enforced en AMBOS lados** (8 MB por defecto, configurable con `--max-mb` / `$CARTERO_MAX_ATTACH_MB`):
 - **Envío:** el emisor se niega a adjuntar un archivo sobre el tope (los blobs van directo a su repo git; uno sin tope lo inflaría).
-- **Recepción:** el receptor rechaza descargar/descifrar un blob sobre el tope. El `size` del descriptor lo **afirma el emisor**, así que el límite se acota sobre los **bytes reales** traídos, no sobre el `size` declarado.
+- **Recepción:** el receptor **rechaza antes de bajar el body** cuando el tamaño se anuncia (pre-chequeo del `Content-Length` del blob raw, ~4/3 del ct); como **backstop**, si el header falta o miente, acota sobre los **bytes reales** del ct. El `size` del descriptor lo **afirma el emisor**, así que no se confía en él (solo se usa para un skip temprano).
 
 ## 7. Canonicalización (NORMATIVA, fijada en F0)
 
