@@ -60,6 +60,8 @@ export async function buildGm(me, groupDoc, content, { created_at, rnd, seq = nu
   return buildEvent(me, { kind: "gm", chat_id, to, created_at, rnd, body: { sealed: MARKER + encode(envelope) }, seq, prev });
 }
 
+// SECURITY CONTRACT: like openDm, openGm only DECRYPTS — it does not authenticate. Always gate with
+// verifyGm first and discard rejected events. resolveGroup does this (verify, then open).
 export async function openGm(ev, me) {
   if (ev.kind !== "gm" || !ev.body || String(ev.body.sealed || "").indexOf(MARKER) !== 0) return null;
   const envelope = decode(String(ev.body.sealed).slice(MARKER.length));

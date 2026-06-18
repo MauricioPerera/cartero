@@ -48,6 +48,11 @@ export async function buildDm(me, peerId, content, { created_at, rnd, seq = null
 }
 
 // Decrypt a DM as `me` (this device's enc key, then rotated-out keys). Anonymous: we trial-unwrap.
+//
+// SECURITY CONTRACT: openDm does NOT authenticate the event — it only decrypts. The AAD binds the
+// envelope to the declared {chat_id, from, to, id, created_at}, but it does NOT prove `from` is the
+// real signer. ALWAYS gate with verifyDm first and discard rejected events; never trust openDm's
+// output on its own. resolveConversation does exactly this (verify, then open).
 export async function openDm(ev, me) {
   if (ev.kind !== "dm" || !ev.body || String(ev.body.sealed || "").indexOf(MARKER) !== 0) return null;
   const envelope = decode(String(ev.body.sealed).slice(MARKER.length));

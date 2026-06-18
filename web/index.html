@@ -69,7 +69,7 @@
 <script type="module">
 import { createIdentity, publicIdentityDoc, eventHash } from "/vendor/postal/src/postal.js";
 import { outbox, eventPath } from "/src/outbox.js";
-import { buildDm, deriveChatId, resolveConversation, verifyDm, openDm } from "/src/convo.js";
+import { buildDm, deriveChatId, resolveConversation, verifyDm } from "/src/convo.js";
 import { encryptFile, decryptFile, makeDescriptor, DEFAULT_MAX_ATTACH } from "/src/attach.js";
 import { parseUri } from "/src/uri.js";
 import { publish as relayPublish, subscribe as relaySubscribe } from "/src/relay.js";
