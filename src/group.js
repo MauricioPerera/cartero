@@ -54,7 +54,9 @@ export async function buildGm(me, groupDoc, content, { created_at, rnd, seq = nu
   const pubs = [];
   for (const mid of groupDoc.members) for (const k of await recipientEncKeys(directory[mid], (directory[mid] || {}).devices || [])) pubs.push(k);
   const set = [...new Set(pubs)];
-  const envelope = await sealAnonymous(JSON.stringify(content), set, aad, { keySlots: Math.max(4, set.length) });
+  // keySlots is a FIXED bucket (not set.length): slots pad to padToBucket(n, 4), so an observer
+  // sees the recipient count rounded up to a multiple of 4 — not the exact group/device size.
+  const envelope = await sealAnonymous(JSON.stringify(content), set, aad, { keySlots: 4 });
   return buildEvent(me, { kind: "gm", chat_id, to, created_at, rnd, body: { sealed: MARKER + encode(envelope) }, seq, prev });
 }
 

@@ -40,7 +40,9 @@ export async function buildDm(me, peerId, content, { created_at, rnd, seq = null
     ...await sealKeys(directory[me.id], me.enc && me.enc.publicKey),
     ...await sealKeys(directory[peerId]),
   ])];
-  const envelope = await sealAnonymous(JSON.stringify(content), pubs, aad, { keySlots: Math.max(4, pubs.length) });
+  // keySlots is a FIXED bucket (not pubs.length): sealAnonymous pads slots to padToBucket(n, 4),
+  // so an observer sees n rounded up to a multiple of 4, never the exact recipient/device count.
+  const envelope = await sealAnonymous(JSON.stringify(content), pubs, aad, { keySlots: 4 });
   const body = { sealed: MARKER + encode(envelope) };
   return buildEvent(me, { kind: "dm", chat_id, to, created_at, rnd, body, seq, prev });
 }

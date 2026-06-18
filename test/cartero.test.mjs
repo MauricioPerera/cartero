@@ -1,8 +1,9 @@
 // Cartero F1 core — proves the SPEC-F0 contract in memory (no git, no network).
 // Run: node test/cartero.test.mjs
-import { createIdentity, publicIdentityDoc, buildEvent, eventPath } from "../vendor/postal/src/postal.js";
+import { createIdentity, publicIdentityDoc, buildEvent, eventPath, MARKER } from "../vendor/postal/src/postal.js";
 import { buildUri, parseUri } from "../src/uri.js";
 import { deriveChatId, buildDm, openDm, verifyDm, resolveConversation } from "../src/convo.js";
+import { buildDeviceCert } from "../src/device.js";
 import { encryptFile, decryptFile, makeDescriptor } from "../src/attach.js";
 
 let pass = 0, fail = 0;
@@ -96,6 +97,24 @@ ok("forged duplicate is dropped, only the real one stays", withForged.length ===
 // even when it is processed FIRST (it must not reserve the path in seenPaths).
 const forgedFirst = await resolveConversation([item(forged), item(ev)], bob, { directory });
 ok("real survives even when the forgery (same id) is processed first", forgedFirst.length === 1 && forgedFirst[0].text === "hola bob 👋");
+
+console.log("# anonymity: the sealed slot count is bucketed, not the exact recipient count");
+const decodeEnv = (ev) => JSON.parse(decodeURIComponent(escape(atob(String(ev.body.sealed).slice(MARKER.length)))));
+// Seal a DM to a peer who has `k` certified devices -> n = 2 (alice + peer master) + k recipients.
+async function slotsForPeerDevices(k) {
+  const peer = await createIdentity("Peer");
+  const certs = [];
+  for (let i = 0; i < k; i++) certs.push(await buildDeviceCert(peer, await createIdentity("d" + i), { created_at: T(0) }));
+  const pdoc = await publicIdentityDoc(peer); pdoc.devices = certs;
+  const dir = { [alice.id]: await publicIdentityDoc(alice), [peer.id]: pdoc };
+  const e = await buildDm(alice, peer.id, { text: "x", reply_to: null, attachments: [] }, { created_at: T(5), rnd: "z", seq: 0, prev: null, directory: dir });
+  return { n: 2 + k, slots: decodeEnv(e).w.length };
+}
+const s5 = await slotsForPeerDevices(3);   // n = 5
+const s7 = await slotsForPeerDevices(5);   // n = 7
+ok("n=5 and n=7 recipients produce the SAME slot count (exact count hidden)", s5.slots === s7.slots);
+ok("slot count is NOT the exact recipient count", s5.slots !== s5.n && s7.slots !== s7.n);
+ok("slots still fit every recipient (>= n)", s5.slots >= s5.n && s7.slots >= s7.n);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
