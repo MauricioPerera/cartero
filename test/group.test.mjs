@@ -20,6 +20,11 @@ ok("id anchored to creator + members include creator", group.id === `grp_${alice
 ok("valid group doc verifies", await verifyGroupDoc(group, { directory }));
 ok("tampered member list rejected (sig breaks)", !(await verifyGroupDoc({ ...group, members: [...group.members, mallory.id] }, { directory })));
 ok("unknown creator rejected", !(await verifyGroupDoc(group, { directory: {} })));
+// roster must name only members: an entry for a non-member is rejected (metadata-leak/DoS defense).
+const rosterWithOutsider = await buildGroupDoc(alice, { name: "proyecto", members: [bob.id], roster: { [bob.id]: "postal://h/o/r#" + bob.id, [mallory.id]: "postal://h/evil/x#" + mallory.id }, created_at: T(0), rnd: "g9" });
+ok("group doc whose roster names a non-member is rejected", !(await verifyGroupDoc(rosterWithOutsider, { directory })));
+const rosterClean = await buildGroupDoc(alice, { name: "proyecto", members: [alice.id, bob.id], roster: { [alice.id]: "postal://h/a/r#" + alice.id, [bob.id]: "postal://h/b/r#" + bob.id }, created_at: T(0), rnd: "ga" });
+ok("group doc with a members-only roster still verifies", await verifyGroupDoc(rosterClean, { directory }));
 
 console.log("# sealed group message: all members read, outsider can't");
 const gm = await buildGm(alice, group, { text: "hola equipo 👥", reply_to: null, attachments: [] },

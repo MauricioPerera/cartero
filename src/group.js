@@ -9,6 +9,10 @@
 // HONEST LIMITS: creator manages membership (no quorum); removing a member does NOT re-key past
 // messages (they were sealed to that member, who can still read the old ones — no forward secrecy);
 // to read you need every member's outbox (resolve them from the directory / their handles).
+// The group doc has NO monotonic version: an OLD doc (with a since-removed member) stays
+// signature-valid, and joiners cache the doc locally without re-fetching, so a membership change
+// does NOT propagate to existing members until they re-join. Anti-rollback (a signed, monotonic
+// roster version the gate enforces) is future work, not in this MVP.
 
 import { canonical, sha256, utf8Bytes, sealAnonymous, openAnonymous, importSignPrivate, importSignPublic, sign, verify } from "../vendor/postal/src/crypto.js";
 import { buildEvent, verifyEvent, eventPath, MARKER } from "../vendor/postal/src/postal.js";
@@ -37,6 +41,10 @@ export async function verifyGroupDoc(doc, { directory } = {}) {
     if (!doc || doc.v !== 1 || !Array.isArray(doc.members) || !doc.creator || !doc.sig) return false;
     if (doc.id !== `grp_${doc.creator}_${doc.id.split("_")[2] || ""}` ) return false;   // id embeds the creator
     if (!doc.members.includes(doc.creator)) return false;
+    // roster (id -> outbox) must name ONLY members: an entry for a non-member would make readers
+    // fetch an arbitrary outbox the creator listed (metadata leak / DoS), even though the gate
+    // already rejects a non-member's messages via author-not-member.
+    if (doc.roster && (typeof doc.roster !== "object" || !Object.keys(doc.roster).every((id) => doc.members.includes(id)))) return false;
     const author = directory && directory[doc.creator];
     if (!author) return false;
     return await verify(await importSignPublic(author.sign_key.pub), doc.sig, canonical(stripSig(doc)));
